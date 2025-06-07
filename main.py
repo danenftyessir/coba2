@@ -1,8 +1,20 @@
 # main.py - ATS CV Search Application
 import sys
 import os
-from PyQt5 import QtWidgets, QtCore, QtGui
+
+# PENTING: Import mysql.connector DULUAN sebelum PyQt5
 import mysql.connector
+
+# add project root to path
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Import PyQt5 setelah mysql.connector
+from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5.QtCore import QThread, QObject, pyqtSignal, pyqtSlot
+
+# Import lainnya
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import date
@@ -12,42 +24,48 @@ import time
 import subprocess
 import platform
 
-# add project root to path
-project_root = os.path.dirname(os.path.abspath(__file__))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# Import algorithms dengan path yang benar
+from src.algorithm.kmp import KMPMatcher
+from src.algorithm.bm import BoyerMooreMatcher
+from src.algorithm.aho_corasick import AhoCorasick
+from src.algorithm.levenshtein import LevenshteinMatcher
 
-# Try different import paths for algorithms
-try:
-    # Try method 1: direct import (algorithm files in root)
-    from aho_corasick import AhoCorasick
-    from kmp import KMPMatcher
-    from bm import BoyerMooreMatcher
-    from levenshtein import LevenshteinMatcher
-    print("✓ Imported algorithms from root directory")
-except ImportError:
-    try:
-        # Try method 2: from algorithm folder
-        from src.algorithm.kmp import KMPMatcher
-        from src.algorithm.bm import BoyerMooreMatcher  
-        from src.algorithm.aho_corasick import AhoCorasick
-        from src.algorithm.levenshtein import LevenshteinMatcher
-        print("✓ Imported algorithms from algorithm/ folder")
-    except ImportError:
+# ===== THREADING FOR SEARCH =====
+class SearchWorker(QObject):
+    """worker thread untuk search operation"""
+    
+    # signals
+    finished = pyqtSignal(list, str)  # results, timing_info
+    error = pyqtSignal(str)  # error message
+    progress = pyqtSignal(str)  # progress message
+    
+    def __init__(self, search_controller, keywords, algorithm, top_n):
+        super().__init__()
+        self.search_controller = search_controller
+        self.keywords = keywords
+        self.algorithm = algorithm
+        self.top_n = top_n
+    
+    @pyqtSlot()
+    def run(self):
+        """jalankan search di background thread"""
         try:
-            # Try method 3: from src/algorithms folder
-            from src.algorithms.kmp import KMPMatcher
-            from src.algorithms.bm import BoyerMooreMatcher  
-            from src.algorithms.aho_corasick import AhoCorasick
-            from src.algorithms.levenshtein import LevenshteinMatcher
-            print("✓ Imported algorithms from src/algorithms/ folder")
-        except ImportError as e:
-            print(f"❌ Could not import algorithms: {e}")
-            print("Please check if algorithm files exist in:")
-            print("  - Root directory (aho_corasick.py, kmp.py, bm.py, levenshtein.py)")
-            print("  - algorithm/ folder")
-            print("  - src/algorithms/ folder")
-            sys.exit(1)
+            self.progress.emit("Initializing search...")
+            
+            # perform search
+            results, timing_info = self.search_controller.search_cvs(
+                keywords=self.keywords,
+                algorithm=self.algorithm,
+                top_n=self.top_n,
+                fuzzy_threshold=0.7
+            )
+            
+            # emit hasil
+            self.finished.emit(results, timing_info)
+            
+        except Exception as e:
+            error_msg = f"Search failed: {str(e)}"
+            self.error.emit(error_msg)
 
 # ===== DATA MODELS =====
 @dataclass
@@ -82,7 +100,7 @@ class CVSummary:
 
 # ===== DATABASE =====
 class DatabaseConfig:
-    """konfigurasi database mysql"""
+    """konfigurasi database mysql dengan optimasi"""
     
     def __init__(self):
         self.config = {
@@ -90,17 +108,38 @@ class DatabaseConfig:
             'user': 'root',
             'password': 'danen332',
             'database': 'kaggle_resumes',
-            'port': 3306
+            'port': 3306,
+            'connection_timeout': 5,       # timeout 5 detik
+            'autocommit': True,            # auto commit
+            'charset': 'utf8mb4',          # encoding
+            'use_unicode': True,           # unicode support
+            'buffered': True               # buffered cursor
         }
     
     def get_connection(self):
-        """buat koneksi ke database"""
-        try:
-            conn = mysql.connector.connect(**self.config)
-            return conn
-        except mysql.connector.Error as e:
-            print(f"error koneksi database: {e}")
-            return None
+        """buat koneksi ke database dengan retry"""
+        import time
+        max_retries = 2
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"📡 Database connection attempt {attempt + 1}/{max_retries}")
+                conn = mysql.connector.connect(**self.config)
+                print("✅ Database connected successfully!")
+                return conn
+                
+            except mysql.connector.Error as e:
+                print(f"❌ MySQL Error (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(1)  # wait 1 second before retry
+                    
+            except Exception as e:
+                print(f"❌ Connection Error (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+        
+        print("❌ All database connection attempts failed")
+        return None
 
 class ResumeRepository:
     """repository untuk akses data resume"""
@@ -215,9 +254,25 @@ class PDFExtractor:
         return cleaned_text.strip()
     
     def extract_text_for_matching(self, pdf_path: str) -> Optional[str]:
-        """ekstrak teks khusus untuk pattern matching (lowercase)"""
+        """ekstrak teks khusus untuk pattern matching (lowercase) dengan optimasi"""
+        if not os.path.exists(pdf_path):
+            print(f"⚠️ File not found: {pdf_path}")
+            return None
+        
+        # cek ukuran file - skip jika terlalu besar (>5MB)
+        try:
+            file_size = os.path.getsize(pdf_path) / (1024 * 1024)  # MB
+            if file_size > 5:
+                print(f"⚠️ Skipping large file ({file_size:.1f}MB): {pdf_path}")
+                return "large file skipped"  # return placeholder
+        except:
+            pass
+        
         text = self.extract_text(pdf_path)
         if text:
+            # batasi panjang teks untuk performance
+            if len(text) > 50000:  # 50k characters max
+                text = text[:50000]
             return text.lower()
         return None
 
@@ -438,27 +493,37 @@ class SearchController:
         
         self.timer.reset()
         
+        print(f"🔍 Starting search for keywords: {keywords}")
+        
         resumes = self.repo.get_all_resumes()
         if not resumes:
             return [], "No CVs found in database"
+        
+        print(f"📄 Found {len(resumes)} CVs in database")
         
         self.timer.start_exact_search(algorithm, len(resumes))
         exact_results = self._exact_search(resumes, keywords, algorithm)
         self.timer.stop_exact_search()
         
+        print(f"✅ Exact search completed. Found {len(exact_results)} matches")
+        
         unfound_keywords = self._get_unfound_keywords(exact_results, keywords)
         
         if unfound_keywords:
+            print(f"🔍 Starting fuzzy search for: {unfound_keywords}")
             self.timer.start_fuzzy_search(len(unfound_keywords))
             fuzzy_results = self._fuzzy_search(resumes, unfound_keywords, fuzzy_threshold)
             self.timer.stop_fuzzy_search()
             combined_results = self._combine_results(exact_results, fuzzy_results)
+            print(f"✅ Fuzzy search completed. Total results: {len(combined_results)}")
         else:
             combined_results = exact_results
         
         combined_results.sort(key=lambda x: x.total_matches, reverse=True)
         top_results = combined_results[:top_n]
         timing_summary = self.timer.get_search_summary()
+        
+        print(f"🎯 Returning top {len(top_results)} results")
         
         return top_results, timing_summary
     
@@ -849,6 +914,43 @@ class SearchPanel(QtWidgets.QWidget):
         self.bm_radio.setEnabled(enabled)
         self.ac_radio.setEnabled(enabled)
         self.top_matches_spin.setEnabled(enabled)
+        
+        # find and update search button
+        for child in self.findChildren(QtWidgets.QPushButton):
+            if child.text() in ["Search", "Searching..."]:
+                child.setEnabled(enabled)
+                if enabled:
+                    child.setText("Search")
+                    child.setStyleSheet("""
+                        QPushButton {
+                            background-color: #3498db;
+                            color: white;
+                            border: none;
+                            padding: 12px 24px;
+                            font-size: 16px;
+                            font-weight: bold;
+                            border-radius: 6px;
+                            min-height: 20px;
+                        }
+                        QPushButton:hover {
+                            background-color: #2980b9;
+                        }
+                    """)
+                else:
+                    child.setText("Searching...")
+                    child.setStyleSheet("""
+                        QPushButton {
+                            background-color: #bdc3c7;
+                            color: white;
+                            border: none;
+                            padding: 12px 24px;
+                            font-size: 16px;
+                            font-weight: bold;
+                            border-radius: 6px;
+                            min-height: 20px;
+                        }
+                    """)
+                break
 
 class ResultsPanel(QtWidgets.QWidget):
     """panel untuk menampilkan hasil pencarian"""
@@ -1549,6 +1651,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search_controller = SearchController()
         self.cv_controller = CVController()
         
+        # threading
+        self.search_thread = None
+        self.search_worker = None
+        
         # ui components
         self.search_panel = None
         self.results_panel = None
@@ -1645,23 +1751,54 @@ class MainWindow(QtWidgets.QMainWindow):
     
     @QtCore.pyqtSlot(list, str, int)
     def perform_search(self, keywords, algorithm, top_n):
-        """handle search request"""
+        """handle search request with background thread"""
         try:
+            print(f"🚀 Starting search: {keywords} using {algorithm}")
+            
             # update ui state
             self.search_panel.set_search_enabled(False)
-            self.results_panel.show_loading("Searching CVs...")
+            self.results_panel.show_loading("Initializing search...")
             self.statusBar().showMessage(f"Searching for: {', '.join(keywords)}")
             
-            # process events to update ui
-            QtWidgets.QApplication.processEvents()
+            # stop previous search if running
+            if self.search_thread and self.search_thread.isRunning():
+                print("⏹️ Stopping previous search...")
+                self.search_thread.quit()
+                self.search_thread.wait()
             
-            # perform search
-            results, timing_info = self.search_controller.search_cvs(
-                keywords=keywords,
-                algorithm=algorithm,
-                top_n=top_n,
-                fuzzy_threshold=0.7
+            # create worker thread
+            self.search_worker = SearchWorker(
+                self.search_controller, keywords, algorithm, top_n
             )
+            
+            self.search_thread = QThread()
+            self.search_worker.moveToThread(self.search_thread)
+            
+            # connect signals
+            self.search_thread.started.connect(self.search_worker.run)
+            self.search_worker.finished.connect(self.on_search_finished)
+            self.search_worker.error.connect(self.on_search_error)
+            self.search_worker.progress.connect(self.on_search_progress)
+            
+            # cleanup when done
+            self.search_worker.finished.connect(self.search_thread.quit)
+            self.search_worker.error.connect(self.search_thread.quit)
+            self.search_thread.finished.connect(self.search_worker.deleteLater)
+            self.search_thread.finished.connect(self.search_thread.deleteLater)
+            
+            # start search
+            self.search_thread.start()
+            print("✅ Search thread started")
+            
+        except Exception as e:
+            print(f"❌ Error starting search: {e}")
+            self.on_search_error(f"Failed to start search: {str(e)}")
+    
+    @QtCore.pyqtSlot(list, str)
+    def on_search_finished(self, results, timing_info):
+        """handle search completion"""
+        try:
+            print(f"🎉 Search completed with {len(results)} results")
             
             # show results
             self.results_panel.show_search_results(results, timing_info)
@@ -1669,21 +1806,43 @@ class MainWindow(QtWidgets.QMainWindow):
             # update status
             result_count = len(results)
             self.statusBar().showMessage(
-                f"Found {result_count} matching CVs for: {', '.join(keywords)}"
+                f"Found {result_count} matching CVs"
             )
             
         except Exception as e:
-            # handle errors
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Search Error", 
-                f"An error occurred during search:\n{str(e)}"
-            )
-            self.statusBar().showMessage("Search failed")
-            
+            print(f"❌ Error showing results: {e}")
+            self.on_search_error(f"Error displaying results: {str(e)}")
         finally:
             # restore ui state
             self.search_panel.set_search_enabled(True)
+    
+    @QtCore.pyqtSlot(str)
+    def on_search_error(self, error_message):
+        """handle search error"""
+        print(f"❌ Search error: {error_message}")
+        
+        # show error dialog
+        QtWidgets.QMessageBox.critical(
+            self,
+            "Search Error", 
+            f"Search failed:\n{error_message}"
+        )
+        
+        # update status
+        self.statusBar().showMessage("Search failed")
+        
+        # restore ui state
+        self.search_panel.set_search_enabled(True)
+        
+        # show initial message
+        self.results_panel.show_initial_message()
+    
+    @QtCore.pyqtSlot(str)
+    def on_search_progress(self, message):
+        """handle search progress updates"""
+        print(f"📊 Progress: {message}")
+        self.statusBar().showMessage(message)
+        self.results_panel.show_loading(message)
     
     @QtCore.pyqtSlot(str)
     def show_cv_summary(self, resume_id):
@@ -1740,7 +1899,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage("File opening failed")
     
     def closeEvent(self, event):
-        """handle aplikasi closing"""
+        """handle aplikasi closing dengan thread cleanup"""
+        # stop search thread jika masih running
+        if self.search_thread and self.search_thread.isRunning():
+            print("🛑 Stopping search thread...")
+            self.search_thread.quit()
+            self.search_thread.wait(3000)  # wait max 3 seconds
+        
         reply = QtWidgets.QMessageBox.question(
             self,
             "Exit Application",
@@ -1750,6 +1915,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         
         if reply == QtWidgets.QMessageBox.Yes:
+            print("👋 Application closing...")
             event.accept()
         else:
             event.ignore()
