@@ -1,306 +1,291 @@
-"""
-results panel untuk menampilkan hasil pencarian cv
-"""
+# src/ui/results_panel.py
+from PyQt5 import QtWidgets, QtCore, QtGui
+from typing import List, Callable
+from ..database.models import SearchResult
 
-# deteksi qt framework
-try:
-    from PySide6 import QtWidgets, QtCore, QtGui
-    from PySide6.QtCore import Signal as pyqtSignal
-    QT_FRAMEWORK = "PySide6"
-except ImportError:
-    try:
-        from PyQt5 import QtWidgets, QtCore, QtGui
-        from PyQt5.QtCore import pyqtSignal
-        QT_FRAMEWORK = "PyQt5"
-    except ImportError:
-        raise ImportError("Tidak ada framework Qt yang tersedia")
-
-class CVResultCard(QtWidgets.QFrame):
-    """card untuk menampilkan satu hasil cv"""
+class ResultsPanel(QtWidgets.QWidget):
+    """panel untuk menampilkan hasil pencarian"""
     
-    summary_requested = pyqtSignal(int, str)  # applicant_id, cv_path
-    view_cv_requested = pyqtSignal(str)  # cv_path
+    # signals
+    summary_requested = QtCore.pyqtSignal(str)  # resume_id
+    view_cv_requested = QtCore.pyqtSignal(str)  # resume_id
     
-    def __init__(self, result_data, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.result_data = result_data
-        self.setObjectName("cv_card")
-        self._init_ui()
-        self._apply_styles()
+        self.search_results = []
+        self.setup_ui()
     
-    def _init_ui(self):
-        """setup ui card"""
+    def setup_ui(self):
+        """setup user interface"""
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
         
-        # header dengan nama dan match count
+        # timing section
+        self.timing_label = QtWidgets.QLabel("")
+        self.timing_label.setStyleSheet("""
+            QLabel {
+                background-color: #ecf0f1;
+                padding: 10px;
+                border-radius: 5px;
+                font-family: monospace;
+                font-size: 12px;
+                color: #2c3e50;
+            }
+        """)
+        self.timing_label.hide()  # hide initially
+        layout.addWidget(self.timing_label)
+        
+        # results header
+        self.results_header = QtWidgets.QLabel("Results")
+        self.results_header.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                color: #2c3e50;
+                margin-bottom: 10px;
+            }
+        """)
+        self.results_header.hide()  # hide initially
+        layout.addWidget(self.results_header)
+        
+        # scroll area for results
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+        """)
+        
+        # container widget for results
+        self.results_widget = QtWidgets.QWidget()
+        self.results_layout = QtWidgets.QVBoxLayout(self.results_widget)
+        self.results_layout.setSpacing(10)
+        self.results_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.scroll_area.setWidget(self.results_widget)
+        layout.addWidget(self.scroll_area)
+        
+        # initial message
+        self.show_initial_message()
+    
+    def show_initial_message(self):
+        """tampilkan pesan awal"""
+        msg = QtWidgets.QLabel("Enter keywords and click Search to find matching CVs")
+        msg.setAlignment(QtCore.Qt.AlignCenter)
+        msg.setStyleSheet("""
+            QLabel {
+                color: #7f8c8d;
+                font-size: 16px;
+                padding: 50px;
+            }
+        """)
+        self.results_layout.addWidget(msg)
+        self.results_layout.addStretch()
+    
+    def show_search_results(self, results: List[SearchResult], timing_info: str):
+        """tampilkan hasil pencarian"""
+        # clear previous results
+        self.clear_results()
+        
+        # show timing info
+        self.timing_label.setText(timing_info)
+        self.timing_label.show()
+        
+        # show results header
+        result_count = len(results)
+        self.results_header.setText(f"Results ({result_count} CVs scanned)")
+        self.results_header.show()
+        
+        if not results:
+            self.show_no_results()
+            return
+        
+        # store results
+        self.search_results = results
+        
+        # create result cards
+        for i, result in enumerate(results):
+            card = self._create_result_card(result, i + 1)
+            self.results_layout.addWidget(card)
+        
+        # add stretch at end
+        self.results_layout.addStretch()
+    
+    def show_no_results(self):
+        """tampilkan pesan tidak ada hasil"""
+        msg = QtWidgets.QLabel("No matching CVs found")
+        msg.setAlignment(QtCore.Qt.AlignCenter)
+        msg.setStyleSheet("""
+            QLabel {
+                color: #e74c3c;
+                font-size: 16px;
+                padding: 30px;
+            }
+        """)
+        self.results_layout.addWidget(msg)
+        self.results_layout.addStretch()
+    
+    def clear_results(self):
+        """bersihkan hasil sebelumnya"""
+        # clear layout
+        while self.results_layout.count():
+            child = self.results_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        # hide timing and header
+        self.timing_label.hide()
+        self.results_header.hide()
+    
+    def _create_result_card(self, result: SearchResult, rank: int) -> QtWidgets.QWidget:
+        """buat card untuk satu hasil pencarian"""
+        card = QtWidgets.QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #bdc3c7;
+                border-radius: 8px;
+                padding: 5px;
+            }
+            QFrame:hover {
+                border-color: #3498db;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            }
+        """)
+        
+        layout = QtWidgets.QVBoxLayout(card)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # header dengan nama dan rank
         header_layout = QtWidgets.QHBoxLayout()
         
-        # nama kandidat
-        name_label = QtWidgets.QLabel(self.result_data['name'])
-        name_label.setObjectName("candidate_name")
-        font = QtGui.QFont()
-        font.setPointSize(14)
-        font.setBold(True)
-        name_label.setFont(font)
+        # nama candidate
+        name = result.resume.name or result.resume.id
+        name_label = QtWidgets.QLabel(f"{rank}. {name}")
+        name_label.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #2c3e50;
+            }
+        """)
         header_layout.addWidget(name_label)
         
+        # total matches
+        matches_label = QtWidgets.QLabel(f"{result.total_matches} matches")
+        matches_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                color: #27ae60;
+                font-weight: bold;
+            }
+        """)
+        header_layout.addWidget(matches_label)
         header_layout.addStretch()
-        
-        # match count badge
-        match_count = self.result_data['total_matches']
-        match_badge = QtWidgets.QLabel(f"{match_count} matches")
-        match_badge.setObjectName("match_badge")
-        if QT_FRAMEWORK == "PySide6":
-            match_badge.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        else:
-            match_badge.setAlignment(QtCore.Qt.AlignCenter)
-        header_layout.addWidget(match_badge)
         
         layout.addLayout(header_layout)
         
-        # keywords yang match
-        if self.result_data['keyword_matches']:
-            keywords_text = ", ".join([
-                f"{keyword} ({count}x)" 
-                for keyword, count in self.result_data['keyword_matches'].items()
-            ])
-            
-            keywords_label = QtWidgets.QLabel(f"Keywords: {keywords_text}")
-            keywords_label.setObjectName("keywords_label")
-            keywords_label.setWordWrap(True)
-            layout.addWidget(keywords_label)
+        # matched keywords
+        keywords_text = self._format_matched_keywords(result.keyword_matches)
+        keywords_label = QtWidgets.QLabel(keywords_text)
+        keywords_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #7f8c8d;
+                margin-bottom: 10px;
+            }
+        """)
+        keywords_label.setWordWrap(True)
+        layout.addWidget(keywords_label)
         
         # buttons
         buttons_layout = QtWidgets.QHBoxLayout()
         
         # summary button
-        summary_btn = QtWidgets.QPushButton("📄 Summary")
-        summary_btn.setObjectName("summary_button")
-        if QT_FRAMEWORK == "PySide6":
-            summary_btn.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
-        else:
-            summary_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        summary_btn.clicked.connect(self._on_summary_clicked)
+        summary_btn = QtWidgets.QPushButton("Summary")
+        summary_btn.setStyleSheet(self._get_button_style("#3498db"))
+        summary_btn.clicked.connect(
+            lambda: self.summary_requested.emit(result.resume.id)
+        )
         buttons_layout.addWidget(summary_btn)
         
         # view cv button
-        view_btn = QtWidgets.QPushButton("👁️ View CV")
-        view_btn.setObjectName("view_button")
-        if QT_FRAMEWORK == "PySide6":
-            view_btn.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
-        else:
-            view_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        view_btn.clicked.connect(self._on_view_clicked)
+        view_btn = QtWidgets.QPushButton("View CV")
+        view_btn.setStyleSheet(self._get_button_style("#2ecc71"))
+        view_btn.clicked.connect(
+            lambda: self.view_cv_requested.emit(result.resume.id)
+        )
         buttons_layout.addWidget(view_btn)
         
+        buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
+        
+        return card
     
-    def _apply_styles(self):
-        """apply card styles"""
-        self.setStyleSheet("""
-            #cv_card {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 12px;
-                margin-bottom: 8px;
-            }
-            
-            #cv_card:hover {
-                border-color: #CBD5E1;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            }
-            
-            #candidate_name {
-                color: #22223B;
-            }
-            
-            #match_badge {
-                background-color: #457DF6;
-                color: #FFFFFF;
-                border-radius: 12px;
-                padding: 4px 12px;
-                font-size: 11pt;
-                font-weight: bold;
-            }
-            
-            #keywords_label {
-                color: #64748B;
-                font-size: 10pt;
-                margin: 4px 0;
-            }
-            
-            #summary_button, #view_button {
-                background-color: #F2F4F8;
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
+    def _format_matched_keywords(self, keyword_matches: dict) -> str:
+        """format matched keywords untuk display"""
+        if not keyword_matches:
+            return "No keywords matched"
+        
+        formatted = []
+        for keyword, count in keyword_matches.items():
+            if count > 0:
+                formatted.append(f"{keyword}: {count} occurrence{'s' if count > 1 else ''}")
+        
+        return "; ".join(formatted) if formatted else "No keywords matched"
+    
+    def _get_button_style(self, color: str) -> str:
+        """ambil style untuk button"""
+        return f"""
+            QPushButton {{
+                background-color: {color};
+                color: white;
+                border: none;
                 padding: 8px 16px;
-                font-size: 10pt;
-                font-weight: 500;
-                color: #22223B;
-            }
-            
-            #summary_button:hover {
-                background-color: #457DF6;
-                color: #FFFFFF;
-                border-color: #3461C1;
-            }
-            
-            #view_button:hover {
-                background-color: #22C55E;
-                color: #FFFFFF;
-                border-color: #16A34A;
-            }
-        """)
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: bold;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: {color}dd;
+            }}
+            QPushButton:pressed {{
+                background-color: {color}bb;
+            }}
+        """
     
-    def _on_summary_clicked(self):
-        """handle summary button click"""
-        self.summary_requested.emit(
-            self.result_data['applicant_id'],
-            self.result_data['cv_path']
-        )
-    
-    def _on_view_clicked(self):
-        """handle view cv button click"""
-        self.view_cv_requested.emit(self.result_data['cv_path'])
-
-class ResultsPanel(QtWidgets.QFrame):
-    """panel untuk menampilkan hasil pencarian"""
-    
-    summary_requested = pyqtSignal(int, str)  # applicant_id, cv_path
-    view_cv_requested = pyqtSignal(str)  # cv_path
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("results_panel")
-        self.result_cards = []  # track result cards
-        self._init_ui()
-        self._apply_styles()
-    
-    def _init_ui(self):
-        """setup ui components"""
-        # main layout
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(0)
+    def show_loading(self, message: str = "Searching..."):
+        """tampilkan loading state"""
+        self.clear_results()
         
-        # title
-        title = QtWidgets.QLabel("Hasil Pencarian")
-        title.setObjectName("panel_title")
-        font = QtGui.QFont()
-        font.setPointSize(16)
-        font.setBold(True)
-        title.setFont(font)
-        layout.addWidget(title)
-        layout.addSpacing(16)
+        loading_widget = QtWidgets.QWidget()
+        loading_layout = QtWidgets.QVBoxLayout(loading_widget)
+        loading_layout.setAlignment(QtCore.Qt.AlignCenter)
         
-        # scroll area untuk results
-        scroll_area = QtWidgets.QScrollArea()
-        scroll_area.setObjectName("scroll_area")
-        scroll_area.setWidgetResizable(True)
-        if QT_FRAMEWORK == "PySide6":
-            scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        else:
-            scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-            scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        
-        # widget container untuk cards
-        self.results_container = QtWidgets.QWidget()
-        self.results_layout = QtWidgets.QVBoxLayout(self.results_container)
-        self.results_layout.setContentsMargins(0, 0, 0, 0)
-        self.results_layout.setSpacing(8)
-        
-        # pesan default
-        self.no_results_label = QtWidgets.QLabel("Belum ada pencarian.\nMasukkan keyword dan klik Search.")
-        self.no_results_label.setObjectName("no_results")
-        if QT_FRAMEWORK == "PySide6":
-            self.no_results_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        else:
-            self.no_results_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.no_results_label.setWordWrap(True)
-        self.results_layout.addWidget(self.no_results_label)
-        
-        # spacer
-        self.results_layout.addStretch()
-        
-        scroll_area.setWidget(self.results_container)
-        layout.addWidget(scroll_area, 1)
-    
-    def _apply_styles(self):
-        """apply panel styles"""
-        self.setStyleSheet("""
-            #results_panel {
-                background-color: #F8FAFC;
-                border: none;
-            }
-            
-            #panel_title {
-                color: #22223B;
-                margin-bottom: 16px;
-            }
-            
-            #scroll_area {
-                border: none;
-                background-color: transparent;
-            }
-            
-            #no_results {
-                color: #64748B;
-                font-size: 14pt;
-                font-style: italic;
-                margin: 40px;
+        # loading spinner (simple text for now)
+        loading_label = QtWidgets.QLabel(message)
+        loading_label.setAlignment(QtCore.Qt.AlignCenter)
+        loading_label.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                color: #3498db;
+                padding: 50px;
             }
         """)
+        
+        loading_layout.addWidget(loading_label)
+        self.results_layout.addWidget(loading_widget)
     
-    def display_results(self, results):
-        """tampilkan hasil pencarian"""
-        try:
-            # clear existing results
-            self.clear_results()
-            
-            if not results:
-                self.no_results_label.setText("Tidak ada CV yang cocok dengan keyword.")
-                self.no_results_label.show()
-                return
-            
-            # hide no results message
-            self.no_results_label.hide()
-            
-            # add result cards
-            for result in results:
-                card = CVResultCard(result, self)
-                card.summary_requested.connect(self.summary_requested.emit)
-                card.view_cv_requested.connect(self.view_cv_requested.emit)
-                
-                # insert before stretch
-                self.results_layout.insertWidget(
-                    self.results_layout.count() - 1, card
-                )
-                
-                # track card
-                self.result_cards.append(card)
-            
-            print(f"📋 Menampilkan {len(results)} hasil")
-        
-        except Exception as e:
-            print(f"❌ Error display results: {e}")
-            # fallback - tampilkan error message
-            self.no_results_label.setText(f"Error menampilkan hasil: {str(e)}")
-            self.no_results_label.show()
-    
-    def clear_results(self):
-        """hapus semua hasil card tapi jangan hapus no_results_label"""
-        # hapus semua result cards yang di-track
-        for card in self.result_cards:
-            if card is not None:
-                self.results_layout.removeWidget(card)
-                card.deleteLater()
-        
-        # clear list tracking
-        self.result_cards.clear()
-        
-        # tampilkan no results message
-        self.no_results_label.setText("Sedang mencari...")
-        self.no_results_label.show()
+    def get_result_by_id(self, resume_id: str) -> SearchResult:
+        """ambil search result berdasarkan resume id"""
+        for result in self.search_results:
+            if result.resume.id == resume_id:
+                return result
+        return None

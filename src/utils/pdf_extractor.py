@@ -1,78 +1,62 @@
-# Extract text from PDFs
-import os
+# src/utils/pdf_extractor.py
 import PyPDF2
+import os
+from typing import Optional
 
 class PDFExtractor:
-    """ekstrak text dari file pdf"""
+    """ekstraksi teks dari file pdf"""
     
     def __init__(self):
-        self.last_error = None
+        pass
     
-    def extract_text(self, pdf_path):
-        """ekstrak text dari pdf file"""
+    def extract_text(self, pdf_path: str) -> Optional[str]:
+        """ekstrak teks dari file pdf"""
+        if not os.path.exists(pdf_path):
+            print(f"file tidak ditemukan: {pdf_path}")
+            return None
+        
         try:
-            if not os.path.exists(pdf_path):
-                print(f"file tidak ditemukan: {pdf_path}")
-                self.last_error = f"File not found: {pdf_path}"
-                return None
-                
             with open(pdf_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
+                pdf_reader = PyPDF2.PdfReader(file)
                 text = ""
-                for page_num in range(len(reader.pages)):
-                    page = reader.pages[page_num]
-                    text += page.extract_text() or ""
+                
+                for page in pdf_reader.pages:
+                    text += page.extract_text() + "\n"
+                
+                # bersihkan teks
+                text = self._clean_text(text)
                 return text
+                
         except Exception as e:
-            print(f"error extracting: {e}")
-            self.last_error = str(e)
+            print(f"error ekstraksi pdf {pdf_path}: {e}")
             return None
     
-    def get_last_error(self):
-        """ambil error terakhir"""
-        return self.last_error
+    def _clean_text(self, text: str) -> str:
+        """bersihkan teks hasil ekstraksi"""
+        if not text:
+            return ""
+        
+        # hapus karakter spesial dan bersihkan whitespace
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if line:  # skip empty lines
+                cleaned_lines.append(line)
+        
+        # gabung kembali dengan space
+        cleaned_text = " ".join(cleaned_lines)
+        
+        # hapus multiple spaces
+        import re
+        cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
+        
+        return cleaned_text.strip()
     
-    def extract_text_by_page(self, pdf_path):
-        """ekstrak text per halaman"""
-        try:
-            if not os.path.exists(pdf_path):
-                return []
-                
-            with open(pdf_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
-                pages = []
-                for page_num in range(len(reader.pages)):
-                    page = reader.pages[page_num]
-                    page_text = page.extract_text() or ""
-                    pages.append(page_text)
-                return pages
-        except Exception as e:
-            print(f"error extracting pages: {e}")
-            return []
-    
-    def get_pdf_info(self, pdf_path):
-        """ambil informasi pdf"""
-        try:
-            if not os.path.exists(pdf_path):
-                return None
-                
-            with open(pdf_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
-                info = {
-                    'num_pages': len(reader.pages),
-                    'metadata': reader.metadata,
-                    'is_encrypted': reader.is_encrypted
-                }
-                return info
-        except Exception as e:
-            print(f"error getting pdf info: {e}")
-            return None
-
-if __name__ == '__main__':
-    extractor = PDFExtractor()
-    test_path = "../data/CV_Bryan.pdf"
-    text = extractor.extract_text(test_path)
-    if text:
-        print(f"extracted {len(text)} characters")
-    else:
-        print("extraction failed")
+    def extract_text_for_matching(self, pdf_path: str) -> Optional[str]:
+        """ekstrak teks khusus untuk pattern matching (lowercase)"""
+        text = self.extract_text(pdf_path)
+        if text:
+            return text.lower()
+        return None

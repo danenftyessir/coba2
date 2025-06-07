@@ -1,170 +1,161 @@
+# src/utils/regex_extractor.py
 import re
-from typing import Dict, List, Optional, Any
-from datetime import datetime
+from typing import List, Dict, Optional
+from ..database.models import CVSummary
 
 class RegexExtractor:
-    """ekstrak informasi dari cv text menggunakan regex"""
+    """ekstraksi informasi cv menggunakan regex"""
     
     def __init__(self):
-        # regex patterns untuk berbagai informasi
-        self.patterns = {
-            'email': r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-            'phone': r'(?:\+62|62|0)[\s-]?(?:\d{3,4}[\s-]?){2,3}\d{3,4}',
-            'linkedin': r'(?:https?://)?(?:www\.)?linkedin\.com/in/[\w-]+',
-            'github': r'(?:https?://)?(?:www\.)?github\.com/[\w-]+',
-            'date': r'\b(?:\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}[-/]\d{1,2}[-/]\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4})\b',
-            'skills_section': r'(?i)(?:skills?|keahlian|kemampuan|competenc(?:y|ies))[\s:]*([^\n]+(?:\n[^\n]+)*)',
-            'education_section': r'(?i)(?:education|pendidikan|academic)[\s:]*([^\n]+(?:\n[^\n]+)*)',
-            'experience_section': r'(?i)(?:experience|pengalaman|work history|employment)[\s:]*([^\n]+(?:\n[^\n]+)*)',
-            'summary_section': r'(?i)(?:summary|ringkasan|objective|profile|about)[\s:]*([^\n]+(?:\n[^\n]+)*)'
-        }
+        self.email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        self.phone_pattern = r'(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})'
+        self.date_pattern = r'\b(?:0?[1-9]|1[0-2])[\/\-](?:0?[1-9]|[12][0-9]|3[01])[\/\-](?:19|20)\d{2}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(?:0?[1-9]|[12][0-9]|3[01])[\s,]+(?:19|20)\d{2}\b'
         
-        # common programming languages and tech skills
-        self.tech_skills = [
-            'python', 'java', 'javascript', 'c++', 'c#', 'php', 'ruby', 'swift', 'kotlin',
-            'go', 'rust', 'scala', 'r', 'matlab', 'sql', 'nosql', 'mongodb', 'postgresql',
-            'mysql', 'oracle', 'redis', 'elasticsearch', 'docker', 'kubernetes', 'aws',
-            'azure', 'gcp', 'react', 'angular', 'vue', 'node.js', 'django', 'flask',
-            'spring', 'tensorflow', 'pytorch', 'scikit-learn', 'pandas', 'numpy',
-            'machine learning', 'deep learning', 'data science', 'ai', 'nlp',
-            'computer vision', 'git', 'jenkins', 'ci/cd', 'agile', 'scrum'
-        ]
+    def extract_summary(self, text: str) -> CVSummary:
+        """ekstrak summary lengkap dari cv text"""
+        return CVSummary(
+            name=self._extract_name(text),
+            contact_info=self._extract_contact_info(text),
+            skills=self._extract_skills(text),
+            experience=self._extract_experience(text),
+            education=self._extract_education(text),
+            summary=self._extract_overview(text)
+        )
     
-    def extract_all(self, text: str) -> Dict[str, Any]:
-        """ekstrak semua informasi dari cv text"""
-        if not text:
-            return {}
+    def _extract_name(self, text: str) -> str:
+        """ekstrak nama dari cv"""
+        lines = text.split('\n')
+        if lines:
+            # asumsi nama ada di baris pertama yang tidak kosong
+            for line in lines:
+                line = line.strip()
+                if line and not re.match(r'^[A-Z\s]+$', line):  # bukan header all caps
+                    # ambil kata-kata yang dimulai huruf kapital
+                    words = line.split()
+                    name_words = []
+                    for word in words[:3]:  # max 3 kata untuk nama
+                        if re.match(r'^[A-Z][a-z]+', word):
+                            name_words.append(word)
+                    if name_words:
+                        return " ".join(name_words)
+        return "Unknown"
+    
+    def _extract_contact_info(self, text: str) -> Dict[str, str]:
+        """ekstrak informasi kontak"""
+        contact = {}
         
-        result = {
-            'email': self.extract_email(text),
-            'phone': self.extract_phone(text),
-            'linkedin_url': self.extract_linkedin(text),
-            'github_url': self.extract_github(text),
-            'skills': self.extract_skills(text),
-            'education_history': self.extract_education(text),
-            'work_experience': self.extract_experience(text),
-            'summary_overview': self.extract_summary(text),
-            'dates': self.extract_dates(text)
-        }
+        # email
+        email_match = re.search(self.email_pattern, text)
+        if email_match:
+            contact['email'] = email_match.group()
         
-        return result
+        # phone
+        phone_match = re.search(self.phone_pattern, text)
+        if phone_match:
+            contact['phone'] = phone_match.group()
+        
+        # address (sederhana - ambil setelah kata address)
+        address_pattern = r'(?:address|location):\s*([^\n]+)'
+        address_match = re.search(address_pattern, text, re.IGNORECASE)
+        if address_match:
+            contact['address'] = address_match.group(1).strip()
+        
+        return contact
     
-    def extract_email(self, text: str) -> Optional[str]:
-        """ekstrak email address"""
-        matches = re.findall(self.patterns['email'], text)
-        return matches[0] if matches else None
-    
-    def extract_phone(self, text: str) -> Optional[str]:
-        """ekstrak phone number"""
-        matches = re.findall(self.patterns['phone'], text)
-        if matches:
-            # normalize phone number
-            phone = matches[0].replace(' ', '').replace('-', '')
-            return phone
-        return None
-    
-    def extract_linkedin(self, text: str) -> Optional[str]:
-        """ekstrak linkedin url"""
-        matches = re.findall(self.patterns['linkedin'], text, re.IGNORECASE)
-        return matches[0] if matches else None
-    
-    def extract_github(self, text: str) -> Optional[str]:
-        """ekstrak github url"""
-        matches = re.findall(self.patterns['github'], text, re.IGNORECASE)
-        return matches[0] if matches else None
-    
-    def extract_skills(self, text: str) -> str:
+    def _extract_skills(self, text: str) -> List[str]:
         """ekstrak skills dari cv"""
-        # coba cari section skills
-        skills_match = re.search(self.patterns['skills_section'], text, re.MULTILINE | re.DOTALL)
+        skills = []
+        
+        # cari section skills
+        skills_pattern = r'(?:skills?|technical skills?|core competencies):\s*([^\.]+?)(?:\n\n|\.\s*[A-Z]|$)'
+        skills_match = re.search(skills_pattern, text, re.IGNORECASE | re.DOTALL)
         
         if skills_match:
             skills_text = skills_match.group(1)
-            # clean up text
-            skills_text = re.sub(r'\n+', ', ', skills_text)
-            skills_text = re.sub(r'\s+', ' ', skills_text)
-            return skills_text.strip()
+            # split by common delimiters
+            skill_items = re.split(r'[,;\n•\-\*]', skills_text)
+            
+            for skill in skill_items:
+                skill = skill.strip()
+                if skill and len(skill) > 1:
+                    skills.append(skill)
         
-        # fallback: cari tech skills di seluruh text
-        found_skills = []
-        text_lower = text.lower()
+        # fallback: cari skill keywords umum
+        if not skills:
+            skill_keywords = [
+                'python', 'java', 'javascript', 'react', 'html', 'css', 'sql',
+                'mysql', 'postgresql', 'mongodb', 'docker', 'kubernetes',
+                'machine learning', 'data analysis', 'project management',
+                'teamwork', 'leadership', 'communication'
+            ]
+            
+            for keyword in skill_keywords:
+                if keyword.lower() in text.lower():
+                    skills.append(keyword.title())
         
-        for skill in self.tech_skills:
-            if skill.lower() in text_lower:
-                found_skills.append(skill)
-        
-        return ', '.join(found_skills) if found_skills else ''
+        return skills[:10]  # max 10 skills
     
-    def extract_education(self, text: str) -> str:
-        """ekstrak education history"""
-        edu_match = re.search(self.patterns['education_section'], text, re.MULTILINE | re.DOTALL)
+    def _extract_experience(self, text: str) -> List[Dict[str, str]]:
+        """ekstrak pengalaman kerja"""
+        experiences = []
         
-        if edu_match:
-            edu_text = edu_match.group(1)
-            # ambil beberapa baris saja
-            lines = edu_text.split('\n')[:5]
-            return '\n'.join(line.strip() for line in lines if line.strip())
-        
-        return ''
-    
-    def extract_experience(self, text: str) -> str:
-        """ekstrak work experience"""
-        exp_match = re.search(self.patterns['experience_section'], text, re.MULTILINE | re.DOTALL)
+        # pattern untuk experience section
+        exp_pattern = r'(?:experience|work history|employment):(.*?)(?:education|skills|$)'
+        exp_match = re.search(exp_pattern, text, re.IGNORECASE | re.DOTALL)
         
         if exp_match:
             exp_text = exp_match.group(1)
-            # ambil beberapa baris saja
-            lines = exp_text.split('\n')[:8]
-            return '\n'.join(line.strip() for line in lines if line.strip())
+            
+            # cari date ranges dan job titles
+            job_pattern = r'(\d{2}/\d{4}\s*-\s*\d{2}/\d{4}|\d{4}\s*-\s*\d{4}).*?([A-Z][^.\n]+)'
+            job_matches = re.findall(job_pattern, exp_text)
+            
+            for date_range, title in job_matches:
+                experiences.append({
+                    'period': date_range.strip(),
+                    'position': title.strip(),
+                    'company': 'Company Name'  # placeholder
+                })
         
-        return ''
+        return experiences[:5]  # max 5 experiences
     
-    def extract_summary(self, text: str) -> str:
-        """ekstrak summary/objective"""
-        summary_match = re.search(self.patterns['summary_section'], text, re.MULTILINE | re.DOTALL)
+    def _extract_education(self, text: str) -> List[Dict[str, str]]:
+        """ekstrak riwayat pendidikan"""
+        education = []
+        
+        # pattern untuk education section
+        edu_pattern = r'(?:education|academic background):(.*?)(?:experience|skills|$)'
+        edu_match = re.search(edu_pattern, text, re.IGNORECASE | re.DOTALL)
+        
+        if edu_match:
+            edu_text = edu_match.group(1)
+            
+            # cari degree dan institution
+            degree_pattern = r'(\d{4})\s*([^,\n]+),?\s*([^,\n]+)'
+            degree_matches = re.findall(degree_pattern, edu_text)
+            
+            for year, degree, institution in degree_matches:
+                education.append({
+                    'year': year.strip(),
+                    'degree': degree.strip(),
+                    'institution': institution.strip()
+                })
+        
+        return education[:3]  # max 3 education entries
+    
+    def _extract_overview(self, text: str) -> str:
+        """ekstrak overview/summary"""
+        # cari summary section
+        summary_pattern = r'(?:summary|overview|profile):\s*([^\.]+\.)'
+        summary_match = re.search(summary_pattern, text, re.IGNORECASE | re.DOTALL)
         
         if summary_match:
-            summary_text = summary_match.group(1)
-            # ambil beberapa baris saja
-            lines = summary_text.split('\n')[:3]
-            return ' '.join(line.strip() for line in lines if line.strip())
+            summary = summary_match.group(1).strip()
+            return summary
         
-        return ''
-    
-    def extract_dates(self, text: str) -> List[str]:
-        """ekstrak semua dates dari text"""
-        dates = re.findall(self.patterns['date'], text)
-        return dates
-    
-    def extract_years_of_experience(self, text: str) -> Optional[int]:
-        """coba estimasi years of experience"""
-        # cari pattern seperti "5 years experience", "5+ years", dll
-        year_patterns = [
-            r'(\d+)\+?\s*years?\s*(?:of\s*)?experience',
-            r'experience\s*:\s*(\d+)\+?\s*years?',
-            r'(\d+)\+?\s*years?\s*in\s*'
-        ]
+        # fallback: ambil beberapa kalimat pertama
+        sentences = re.split(r'\.\s+', text)
+        if len(sentences) > 1:
+            return ". ".join(sentences[:2]) + "."
         
-        for pattern in year_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return int(match.group(1))
-        
-        return None
-    
-    def extract_gpa(self, text: str) -> Optional[float]:
-        """ekstrak gpa/ipk"""
-        gpa_patterns = [
-            r'(?:GPA|IPK)[\s:]*(\d+\.\d+)',
-            r'(\d+\.\d+)\s*/\s*4\.0',
-            r'(?:Grade|Nilai)[\s:]*(\d+\.\d+)'
-        ]
-        
-        for pattern in gpa_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                gpa = float(match.group(1))
-                if 0 <= gpa <= 4.0:
-                    return gpa
-        
-        return None
+        return "Professional with experience in the field."
