@@ -39,31 +39,39 @@ class SearchWorker(QObject):
     error = pyqtSignal(str)  # error message
     progress = pyqtSignal(str)  # progress message
     
-    def __init__(self, search_controller, keywords, algorithm, top_n):
+    def __init__(self, search_controller, keywords, algorithm, top_n, threshold=0.7):
         super().__init__()
         self.search_controller = search_controller
         self.keywords = keywords
         self.algorithm = algorithm
         self.top_n = top_n
+        self.threshold = threshold
+        print(f"🔧 SearchWorker initialized with threshold: {self.threshold}")
     
     @pyqtSlot()
     def run(self):
         """jalankan search di background thread"""
         try:
+            print(f"🔍 SearchWorker starting for: {self.keywords} with {self.algorithm} (threshold: {self.threshold})")
             self.progress.emit("Initializing search...")
             
-            # perform search
+            # perform search dengan threshold
             results, timing_info = self.search_controller.search_cvs(
                 keywords=self.keywords,
                 algorithm=self.algorithm,
                 top_n=self.top_n,
-                fuzzy_threshold=0.7
+                fuzzy_threshold=self.threshold
             )
+            
+            print(f"✅ SearchWorker completed with {len(results)} results")
             
             # emit hasil
             self.finished.emit(results, timing_info)
             
         except Exception as e:
+            print(f"❌ SearchWorker error: {e}")
+            import traceback
+            traceback.print_exc()
             error_msg = f"Search failed: {str(e)}"
             self.error.emit(error_msg)
 
@@ -433,9 +441,12 @@ class SearchTimer:
             return duration
         return 0.0
     
-    def start_fuzzy_search(self, num_keywords: int):
+    def start_fuzzy_search(self, num_keywords: int, num_cvs: int = 0, threshold: float = 0.7):
         """mulai timer untuk fuzzy search"""
         self.search_results['fuzzy_keywords'] = num_keywords
+        self.search_results['threshold'] = threshold
+        if num_cvs > 0:  # jika fuzzy search sebagai primary
+            self.search_results['num_cvs'] = num_cvs
         self.start_times['fuzzy_search'] = time.time()
     
     def stop_fuzzy_search(self) -> float:
@@ -449,22 +460,34 @@ class SearchTimer:
         return 0.0
     
     def get_search_summary(self) -> str:
-        """buat summary hasil search timing"""
-        if 'exact_duration' not in self.search_results:
-            return "No search performed"
-        
-        algorithm = self.search_results.get('algorithm', 'Unknown')
-        num_cvs = self.search_results.get('num_cvs', 0)
-        exact_time = f"{self.search_results['exact_duration']:.0f}ms"
-        
-        summary = f"Exact Match ({algorithm}): {num_cvs} CVs scanned in {exact_time}"
-        
-        if 'fuzzy_duration' in self.search_results:
+        """buat summary hasil search timing dengan threshold info"""
+        if 'exact_duration' in self.search_results and 'fuzzy_duration' not in self.search_results:
+            # hanya exact search
+            algorithm = self.search_results.get('algorithm', 'Unknown')
+            num_cvs = self.search_results.get('num_cvs', 0)
+            exact_time = f"{self.search_results['exact_duration']:.0f}ms"
+            return f"Exact Match ({algorithm}): {num_cvs} CVs scanned in {exact_time}"
+            
+        elif 'fuzzy_duration' in self.search_results and 'exact_duration' not in self.search_results:
+            # hanya fuzzy search (Levenshtein sebagai primary)
             fuzzy_keywords = self.search_results.get('fuzzy_keywords', 0)
             fuzzy_time = f"{self.search_results['fuzzy_duration']:.0f}ms"
-            summary += f"\nFuzzy Match: {fuzzy_keywords} keywords processed in {fuzzy_time}"
-        
-        return summary
+            num_cvs = self.search_results.get('num_cvs', 0)
+            threshold = self.search_results.get('threshold', 0.7)
+            return f"Fuzzy Match (Levenshtein, threshold: {threshold:.2f}): {num_cvs} CVs scanned in {fuzzy_time}"
+            
+        elif 'exact_duration' in self.search_results and 'fuzzy_duration' in self.search_results:
+            # exact + fuzzy fallback
+            algorithm = self.search_results.get('algorithm', 'Unknown')
+            num_cvs = self.search_results.get('num_cvs', 0)
+            exact_time = f"{self.search_results['exact_duration']:.0f}ms"
+            fuzzy_keywords = self.search_results.get('fuzzy_keywords', 0)
+            fuzzy_time = f"{self.search_results['fuzzy_duration']:.0f}ms"
+            threshold = self.search_results.get('threshold', 0.7)
+            return f"Exact Match ({algorithm}): {num_cvs} CVs scanned in {exact_time}\nFuzzy Fallback (threshold: {threshold:.2f}): {fuzzy_keywords} keywords processed in {fuzzy_time}"
+            
+        else:
+            return "No search performed"
     
     def reset(self):
         """reset search timer"""
@@ -493,7 +516,7 @@ class SearchController:
         
         self.timer.reset()
         
-        print(f"🔍 Starting search for keywords: {keywords}")
+        print(f"🔍 Starting search for keywords: {keywords} using {algorithm}")
         
         resumes = self.repo.get_all_resumes()
         if not resumes:
@@ -501,21 +524,38 @@ class SearchController:
         
         print(f"📄 Found {len(resumes)} CVs in database")
         
+        # jika user pilih Levenshtein sebagai algoritma utama
+        if algorithm.upper() == 'LEVENSHTEIN':
+            print("🔍 Using Levenshtein as primary algorithm")
+            self.timer.start_fuzzy_search(len(keywords), len(resumes), fuzzy_threshold)  # tambah threshold
+            results = self._fuzzy_search(resumes, keywords, fuzzy_threshold)
+            self.timer.stop_fuzzy_search()
+            
+            # urutkan dan return
+            results.sort(key=lambda x: x.total_matches, reverse=True)
+            top_results = results[:top_n]
+            timing_summary = self.timer.get_search_summary()
+            
+            print(f"🎯 Levenshtein search completed with {len(top_results)} results")
+            return top_results, timing_summary
+        
+        # untuk exact matching algorithms (KMP, BM, AC)
         self.timer.start_exact_search(algorithm, len(resumes))
         exact_results = self._exact_search(resumes, keywords, algorithm)
         self.timer.stop_exact_search()
         
         print(f"✅ Exact search completed. Found {len(exact_results)} matches")
         
+        # fuzzy matching sebagai fallback (jika ada keyword yang tidak ketemu)
         unfound_keywords = self._get_unfound_keywords(exact_results, keywords)
         
         if unfound_keywords:
-            print(f"🔍 Starting fuzzy search for: {unfound_keywords}")
-            self.timer.start_fuzzy_search(len(unfound_keywords))
+            print(f"🔍 Starting fuzzy search fallback for: {unfound_keywords}")
+            self.timer.start_fuzzy_search(len(unfound_keywords), 0, fuzzy_threshold)
             fuzzy_results = self._fuzzy_search(resumes, unfound_keywords, fuzzy_threshold)
             self.timer.stop_fuzzy_search()
             combined_results = self._combine_results(exact_results, fuzzy_results)
-            print(f"✅ Fuzzy search completed. Total results: {len(combined_results)}")
+            print(f"✅ Fuzzy fallback completed. Total results: {len(combined_results)}")
         else:
             combined_results = exact_results
         
@@ -789,34 +829,135 @@ class SearchPanel(QtWidgets.QWidget):
             }
         """)
         
-        layout = QtWidgets.QHBoxLayout(group)
+        layout = QtWidgets.QVBoxLayout(group)
+        
+        # exact matching algorithms
+        exact_label = QtWidgets.QLabel("Exact Matching:")
+        exact_label.setStyleSheet("font-size: 12px; color: #7f8c8d; margin-top: 5px;")
+        layout.addWidget(exact_label)
+        
+        exact_layout = QtWidgets.QHBoxLayout()
         
         self.kmp_radio = QtWidgets.QRadioButton("KMP")
         self.bm_radio = QtWidgets.QRadioButton("BM")
         self.ac_radio = QtWidgets.QRadioButton("AC")
         
+        # fuzzy matching algorithm
+        self.levenshtein_radio = QtWidgets.QRadioButton("Levenshtein")
+        
+        # default selection
         self.kmp_radio.setChecked(True)
         
+        # styling
         radio_style = """
             QRadioButton {
                 font-size: 14px;
                 spacing: 5px;
+                margin: 2px;
             }
             QRadioButton::indicator {
                 width: 18px;
                 height: 18px;
             }
         """
-        self.kmp_radio.setStyleSheet(radio_style)
-        self.bm_radio.setStyleSheet(radio_style)
-        self.ac_radio.setStyleSheet(radio_style)
         
-        layout.addWidget(self.kmp_radio)
-        layout.addWidget(self.bm_radio)
-        layout.addWidget(self.ac_radio)
-        layout.addStretch()
+        for radio in [self.kmp_radio, self.bm_radio, self.ac_radio, self.levenshtein_radio]:
+            radio.setStyleSheet(radio_style)
+        
+        exact_layout.addWidget(self.kmp_radio)
+        exact_layout.addWidget(self.bm_radio)
+        exact_layout.addWidget(self.ac_radio)
+        exact_layout.addStretch()
+        
+        layout.addLayout(exact_layout)
+        
+        # fuzzy matching section
+        fuzzy_label = QtWidgets.QLabel("Fuzzy Matching:")
+        fuzzy_label.setStyleSheet("font-size: 12px; color: #7f8c8d; margin-top: 10px;")
+        layout.addWidget(fuzzy_label)
+        
+        fuzzy_layout = QtWidgets.QHBoxLayout()
+        fuzzy_layout.addWidget(self.levenshtein_radio)
+        fuzzy_layout.addStretch()
+        
+        layout.addLayout(fuzzy_layout)
+        
+        # similarity threshold for Levenshtein
+        threshold_layout = QtWidgets.QHBoxLayout()
+        threshold_label = QtWidgets.QLabel("Similarity Threshold:")
+        threshold_label.setStyleSheet("font-size: 11px; color: #7f8c8d; margin-left: 20px;")
+        
+        self.threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.threshold_slider.setRange(30, 100)  # 0.3 to 1.0
+        self.threshold_slider.setValue(70)       # default 0.7
+        self.threshold_slider.setMaximumWidth(100)
+        self.threshold_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #bdc3c7;
+                height: 6px;
+                background: #ecf0f1;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #3498db;
+                border: 1px solid #2980b9;
+                width: 14px;
+                margin: -5px 0;
+                border-radius: 7px;
+            }
+        """)
+        
+        self.threshold_value_label = QtWidgets.QLabel("0.70")
+        self.threshold_value_label.setStyleSheet("font-size: 11px; color: #2c3e50; font-weight: bold; min-width: 30px;")
+        
+        # connect slider to label update
+        self.threshold_slider.valueChanged.connect(self._update_threshold_label)
+        
+        threshold_layout.addWidget(threshold_label)
+        threshold_layout.addWidget(self.threshold_slider)
+        threshold_layout.addWidget(self.threshold_value_label)
+        threshold_layout.addStretch()
+        
+        layout.addLayout(threshold_layout)
+        
+        # enable/disable threshold based on algorithm selection
+        self.levenshtein_radio.toggled.connect(self._on_algorithm_changed)
+        self.kmp_radio.toggled.connect(self._on_algorithm_changed)
+        self.bm_radio.toggled.connect(self._on_algorithm_changed)
+        self.ac_radio.toggled.connect(self._on_algorithm_changed)
+        
+        # set initial state
+        self._on_algorithm_changed()
+        
+        # note about fuzzy matching
+        note_label = QtWidgets.QLabel("Note: Fuzzy matching also runs automatically if exact matching finds no results")
+        note_label.setStyleSheet("""
+            font-size: 10px; 
+            color: #95a5a6; 
+            margin-top: 5px;
+            font-style: italic;
+        """)
+        note_label.setWordWrap(True)
+        layout.addWidget(note_label)
         
         return group
+    
+    def _update_threshold_label(self, value):
+        """update threshold label saat slider berubah"""
+        threshold = value / 100.0
+        self.threshold_value_label.setText(f"{threshold:.2f}")
+    
+    def _on_algorithm_changed(self):
+        """enable/disable threshold control based on algorithm"""
+        is_levenshtein = self.levenshtein_radio.isChecked()
+        self.threshold_slider.setEnabled(is_levenshtein)
+        self.threshold_value_label.setEnabled(is_levenshtein)
+        
+        # update threshold label style
+        if is_levenshtein:
+            self.threshold_value_label.setStyleSheet("font-size: 11px; color: #2c3e50; font-weight: bold; min-width: 30px;")
+        else:
+            self.threshold_value_label.setStyleSheet("font-size: 11px; color: #bdc3c7; font-weight: bold; min-width: 30px;")
     
     def _create_matches_section(self) -> QtWidgets.QGroupBox:
         """buat section top matches selector"""
@@ -897,15 +1038,39 @@ class SearchPanel(QtWidgets.QWidget):
             )
             return
         
-        algorithm = 'KMP'
+        # ambil algorithm yang dipilih
+        algorithm = 'KMP'  # default
         if self.bm_radio.isChecked():
             algorithm = 'BM'
         elif self.ac_radio.isChecked():
             algorithm = 'AC'
+        elif self.levenshtein_radio.isChecked():
+            algorithm = 'LEVENSHTEIN'
+        
+        # ambil threshold value untuk semua (default 0.7 untuk non-Levenshtein)
+        if self.levenshtein_radio.isChecked():
+            threshold = self.threshold_slider.value() / 100.0
+        else:
+            threshold = 0.7  # default untuk exact matching fallback
         
         top_n = self.top_matches_spin.value()
         
-        self.search_requested.emit(keywords, algorithm, top_n)
+        print(f"🎯 Emitting search signal:")
+        print(f"   Keywords: {keywords} (type: {type(keywords)})")
+        print(f"   Algorithm: {algorithm} (type: {type(algorithm)})")
+        print(f"   Top N: {top_n} (type: {type(top_n)})")  
+        print(f"   Threshold: {threshold} (type: {type(threshold)})")
+        
+        # emit dengan explicit signature (4 parameters)
+        try:
+            self.search_requested[list, str, int, float].emit(keywords, algorithm, top_n, threshold)
+            print("✅ Signal emitted with 4 parameters")
+        except Exception as e:
+            print(f"❌ 4-param emit failed: {e}")
+            # fallback to 3 parameters
+            print("🔄 Falling back to 3 parameters...")
+            self.search_requested[list, str, int].emit(keywords, algorithm, top_n)
+            print("✅ Signal emitted with 3 parameters (threshold=0.7 default)")
     
     def set_search_enabled(self, enabled: bool):
         """enable/disable search functionality"""
@@ -913,6 +1078,8 @@ class SearchPanel(QtWidgets.QWidget):
         self.kmp_radio.setEnabled(enabled)
         self.bm_radio.setEnabled(enabled)
         self.ac_radio.setEnabled(enabled)
+        self.levenshtein_radio.setEnabled(enabled)
+        self.threshold_slider.setEnabled(enabled and self.levenshtein_radio.isChecked())  # conditional enable
         self.top_matches_spin.setEnabled(enabled)
         
         # find and update search button
@@ -1651,7 +1818,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search_controller = SearchController()
         self.cv_controller = CVController()
         
-        # threading
+        # threading - inisialisasi sebagai None
         self.search_thread = None
         self.search_worker = None
         
@@ -1719,15 +1886,37 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def setup_connections(self):
         """setup signal connections"""
-        # search panel signals
-        self.search_panel.search_requested.connect(self.perform_search)
+        print("🔗 Setting up signal connections...")
+        
+        # search panel signals - handle both 3 and 4 parameter versions
+        try:
+            # try connecting the 4-parameter version first
+            self.search_panel.search_requested[list, str, int, float].connect(self.perform_search)
+            print("   ✓ Search panel connected (4 params with threshold)")
+        except Exception as e:
+            print(f"   ⚠️ 4-param connection failed: {e}")
+            try:
+                # fallback to 3-parameter version
+                self.search_panel.search_requested[list, str, int].connect(self.perform_search_fallback)
+                print("   ✓ Search panel connected (3 params fallback)")
+            except Exception as e2:
+                print(f"   ❌ All search panel connections failed: {e2}")
         
         # results panel signals
         self.results_panel.summary_requested.connect(self.show_cv_summary)
         self.results_panel.view_cv_requested.connect(self.view_cv_file)
+        print("   ✓ Results panel connected")
         
         # summary view signals
         self.summary_view.view_cv_requested.connect(self.view_cv_file)
+        print("   ✓ Summary view connected")
+        
+        print("✅ All signal connections established")
+    
+    def perform_search_fallback(self, keywords, algorithm, top_n):
+        """fallback search handler with default threshold"""
+        print("🔄 Using fallback search handler (threshold=0.7)")
+        self.perform_search(keywords, algorithm, top_n, 0.7)
     
     def check_database_connection(self):
         """cek koneksi database saat startup"""
@@ -1749,26 +1938,34 @@ class MainWindow(QtWidgets.QMainWindow):
             conn.close()
             self.statusBar().showMessage("Database connected - Ready to search")
     
-    @QtCore.pyqtSlot(list, str, int)
-    def perform_search(self, keywords, algorithm, top_n):
+    def perform_search(self, keywords, algorithm, top_n, threshold=0.7):
         """handle search request with background thread"""
         try:
-            print(f"🚀 Starting search: {keywords} using {algorithm}")
+            # handle parameter types
+            if isinstance(keywords, str):
+                keywords = [keywords]
+            if not isinstance(threshold, (int, float)):
+                threshold = 0.7
+            
+            print(f"🎯 Received search signal:")
+            print(f"   Keywords: {keywords} (type: {type(keywords)})")
+            print(f"   Algorithm: {algorithm} (type: {type(algorithm)})")
+            print(f"   Top N: {top_n} (type: {type(top_n)})")  
+            print(f"   Threshold: {threshold} (type: {type(threshold)})")
+            
+            print(f"🚀 Starting search: {keywords} using {algorithm} (threshold: {threshold})")
             
             # update ui state
             self.search_panel.set_search_enabled(False)
             self.results_panel.show_loading("Initializing search...")
             self.statusBar().showMessage(f"Searching for: {', '.join(keywords)}")
             
-            # stop previous search if running
-            if self.search_thread and self.search_thread.isRunning():
-                print("⏹️ Stopping previous search...")
-                self.search_thread.quit()
-                self.search_thread.wait()
+            # stop and cleanup previous search if running
+            self._cleanup_search_thread()
             
-            # create worker thread
+            # create NEW worker and thread objects setiap kali dengan threshold
             self.search_worker = SearchWorker(
-                self.search_controller, keywords, algorithm, top_n
+                self.search_controller, keywords, algorithm, top_n, float(threshold)
             )
             
             self.search_thread = QThread()
@@ -1780,19 +1977,55 @@ class MainWindow(QtWidgets.QMainWindow):
             self.search_worker.error.connect(self.on_search_error)
             self.search_worker.progress.connect(self.on_search_progress)
             
-            # cleanup when done
-            self.search_worker.finished.connect(self.search_thread.quit)
-            self.search_worker.error.connect(self.search_thread.quit)
-            self.search_thread.finished.connect(self.search_worker.deleteLater)
-            self.search_thread.finished.connect(self.search_thread.deleteLater)
+            # cleanup connections
+            self.search_worker.finished.connect(self._cleanup_search_thread)
+            self.search_worker.error.connect(self._cleanup_search_thread)
             
             # start search
             self.search_thread.start()
-            print("✅ Search thread started")
+            print("✅ Search thread started successfully")
             
         except Exception as e:
             print(f"❌ Error starting search: {e}")
+            import traceback
+            traceback.print_exc()
             self.on_search_error(f"Failed to start search: {str(e)}")
+    
+    def _cleanup_search_thread(self):
+        """cleanup search thread dengan aman"""
+        try:
+            if self.search_thread is not None:
+                print("🧹 Cleaning up search thread...")
+                
+                # disconnect signals untuk avoid multiple calls
+                try:
+                    self.search_thread.started.disconnect()
+                except:
+                    pass
+                
+                # quit thread dengan timeout
+                if self.search_thread.isRunning():
+                    self.search_thread.quit()
+                    if not self.search_thread.wait(2000):  # wait max 2 seconds
+                        print("⚠️ Thread forced termination")
+                        self.search_thread.terminate()
+                        self.search_thread.wait()
+                
+                # cleanup objects
+                if self.search_worker is not None:
+                    self.search_worker.deleteLater()
+                    self.search_worker = None
+                
+                self.search_thread.deleteLater()
+                self.search_thread = None
+                
+                print("✅ Thread cleanup completed")
+                
+        except Exception as e:
+            print(f"⚠️ Error during thread cleanup: {e}")
+            # force reset
+            self.search_thread = None
+            self.search_worker = None
     
     @QtCore.pyqtSlot(list, str)
     def on_search_finished(self, results, timing_info):
@@ -1900,11 +2133,8 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def closeEvent(self, event):
         """handle aplikasi closing dengan thread cleanup"""
-        # stop search thread jika masih running
-        if self.search_thread and self.search_thread.isRunning():
-            print("🛑 Stopping search thread...")
-            self.search_thread.quit()
-            self.search_thread.wait(3000)  # wait max 3 seconds
+        # cleanup search thread dengan paksa
+        self._cleanup_search_thread()
         
         reply = QtWidgets.QMessageBox.question(
             self,
@@ -1916,6 +2146,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if reply == QtWidgets.QMessageBox.Yes:
             print("👋 Application closing...")
+            # final cleanup
+            self._cleanup_search_thread()
             event.accept()
         else:
             event.ignore()
@@ -1942,6 +2174,8 @@ def main():
         
         print("✓ Main window created and shown")
         print("✓ Application ready!")
+        print("✓ Database connection tested")
+        print("✓ Threading system initialized")
         
         # run application event loop
         sys.exit(app.exec_())
