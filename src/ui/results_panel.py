@@ -1,12 +1,11 @@
 # src/ui/results_panel.py
-from PyQt5 import QtWidgets, QtCore, QtGui
-from typing import List, Callable
+from PyQt5 import QtWidgets, QtCore
+from typing import List
 from ..database.models import SearchResult
 
 class ResultsPanel(QtWidgets.QWidget):
-    """panel untuk menampilkan hasil pencarian"""
+    """panel untuk menampilkan hasil pencarian cv"""
     
-    # signals
     summary_requested = QtCore.pyqtSignal(str)  # resume_id
     view_cv_requested = QtCore.pyqtSignal(str)  # resume_id
     
@@ -16,12 +15,12 @@ class ResultsPanel(QtWidgets.QWidget):
         self.setup_ui()
     
     def setup_ui(self):
-        """setup user interface"""
+        """setup user interface dengan design yang responsive"""
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
         
-        # timing section
+        # timing info section
         self.timing_label = QtWidgets.QLabel("")
         self.timing_label.setStyleSheet("""
             QLabel {
@@ -31,9 +30,10 @@ class ResultsPanel(QtWidgets.QWidget):
                 font-family: monospace;
                 font-size: 12px;
                 color: #2c3e50;
+                border: 1px solid #bdc3c7;
             }
         """)
-        self.timing_label.hide()  # hide initially
+        self.timing_label.hide()
         layout.addWidget(self.timing_label)
         
         # results header
@@ -46,7 +46,7 @@ class ResultsPanel(QtWidgets.QWidget):
                 margin-bottom: 10px;
             }
         """)
-        self.results_header.hide()  # hide initially
+        self.results_header.hide()
         layout.addWidget(self.results_header)
         
         # scroll area for results
@@ -70,11 +70,11 @@ class ResultsPanel(QtWidgets.QWidget):
         self.scroll_area.setWidget(self.results_widget)
         layout.addWidget(self.scroll_area)
         
-        # initial message
+        # show initial message
         self.show_initial_message()
     
     def show_initial_message(self):
-        """tampilkan pesan awal"""
+        """show initial welcome message"""
         msg = QtWidgets.QLabel("Enter keywords and click Search to find matching CVs")
         msg.setAlignment(QtCore.Qt.AlignCenter)
         msg.setStyleSheet("""
@@ -82,14 +82,16 @@ class ResultsPanel(QtWidgets.QWidget):
                 color: #7f8c8d;
                 font-size: 16px;
                 padding: 50px;
+                background-color: #f8f9fa;
+                border-radius: 8px;
+                border: 2px dashed #bdc3c7;
             }
         """)
         self.results_layout.addWidget(msg)
         self.results_layout.addStretch()
     
     def show_search_results(self, results: List[SearchResult], timing_info: str):
-        """tampilkan hasil pencarian"""
-        # clear previous results
+        """show search results dengan detailed info"""
         self.clear_results()
         
         # show timing info
@@ -98,7 +100,7 @@ class ResultsPanel(QtWidgets.QWidget):
         
         # show results header
         result_count = len(results)
-        self.results_header.setText(f"Results ({result_count} CVs scanned)")
+        self.results_header.setText(f"Results ({result_count} CVs found)")
         self.results_header.show()
         
         if not results:
@@ -113,61 +115,62 @@ class ResultsPanel(QtWidgets.QWidget):
             card = self._create_result_card(result, i + 1)
             self.results_layout.addWidget(card)
         
-        # add stretch at end
         self.results_layout.addStretch()
     
     def show_no_results(self):
-        """tampilkan pesan tidak ada hasil"""
-        msg = QtWidgets.QLabel("No matching CVs found")
+        """show no results message"""
+        msg = QtWidgets.QLabel("No matching CVs found.\nTry different keywords or use fuzzy matching.")
         msg.setAlignment(QtCore.Qt.AlignCenter)
         msg.setStyleSheet("""
             QLabel {
                 color: #e74c3c;
                 font-size: 16px;
                 padding: 30px;
+                background-color: #fdf2f2;
+                border-radius: 8px;
+                border: 2px solid #f5c6cb;
             }
         """)
         self.results_layout.addWidget(msg)
         self.results_layout.addStretch()
     
     def clear_results(self):
-        """bersihkan hasil sebelumnya"""
-        # clear layout
+        """clear previous results"""
         while self.results_layout.count():
             child = self.results_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
         
-        # hide timing and header
         self.timing_label.hide()
         self.results_header.hide()
     
     def _create_result_card(self, result: SearchResult, rank: int) -> QtWidgets.QWidget:
-        """buat card untuk satu hasil pencarian"""
+        """create result card untuk satu cv dengan detailed info"""
         card = QtWidgets.QFrame()
         card.setStyleSheet("""
             QFrame {
                 background-color: white;
-                border: 1px solid #bdc3c7;
+                border: 1px solid #dee2e6;
                 border-radius: 8px;
                 padding: 5px;
+                margin: 2px;
             }
             QFrame:hover {
                 border-color: #3498db;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                box-shadow: 0 2px 8px rgba(52, 152, 219, 0.2);
             }
         """)
         
         layout = QtWidgets.QVBoxLayout(card)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
         layout.setContentsMargins(15, 15, 15, 15)
         
-        # header dengan nama dan rank
+        # header with name and rank
         header_layout = QtWidgets.QHBoxLayout()
         
-        # nama candidate
-        name = result.resume.name or result.resume.id
-        name_label = QtWidgets.QLabel(f"{rank}. {name}")
+        # candidate name
+        name = result.resume.name or f"Candidate {result.resume.id}"
+        name_label = QtWidgets.QLabel(f"#{rank}. {name}")
         name_label.setStyleSheet("""
             QLabel {
                 font-size: 16px;
@@ -177,6 +180,20 @@ class ResultsPanel(QtWidgets.QWidget):
         """)
         header_layout.addWidget(name_label)
         
+        # category badge
+        category_badge = QtWidgets.QLabel(result.resume.category)
+        category_badge.setStyleSheet("""
+            QLabel {
+                background-color: #e9ecef;
+                color: #495057;
+                padding: 2px 8px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """)
+        header_layout.addWidget(category_badge)
+        
         # total matches
         matches_label = QtWidgets.QLabel(f"{result.total_matches} matches")
         matches_label.setStyleSheet("""
@@ -184,6 +201,9 @@ class ResultsPanel(QtWidgets.QWidget):
                 font-size: 14px;
                 color: #27ae60;
                 font-weight: bold;
+                background-color: #d4edda;
+                padding: 4px 8px;
+                border-radius: 12px;
             }
         """)
         header_layout.addWidget(matches_label)
@@ -191,24 +211,45 @@ class ResultsPanel(QtWidgets.QWidget):
         
         layout.addLayout(header_layout)
         
-        # matched keywords
+        # matched keywords with counts
         keywords_text = self._format_matched_keywords(result.keyword_matches)
         keywords_label = QtWidgets.QLabel(keywords_text)
         keywords_label.setStyleSheet("""
             QLabel {
                 font-size: 12px;
-                color: #7f8c8d;
-                margin-bottom: 10px;
+                color: #6c757d;
+                background-color: #f8f9fa;
+                padding: 8px;
+                border-radius: 4px;
+                border-left: 3px solid #3498db;
             }
         """)
         keywords_label.setWordWrap(True)
         layout.addWidget(keywords_label)
         
-        # buttons
+        # contact info if available
+        if result.resume.phone or result.resume.address:
+            contact_parts = []
+            if result.resume.phone:
+                contact_parts.append(f"📞 {result.resume.phone}")
+            if result.resume.address:
+                contact_parts.append(f"📍 {result.resume.address[:50]}...")
+            
+            contact_label = QtWidgets.QLabel(" | ".join(contact_parts))
+            contact_label.setStyleSheet("""
+                QLabel {
+                    font-size: 11px;
+                    color: #868e96;
+                    padding: 4px 0;
+                }
+            """)
+            layout.addWidget(contact_label)
+        
+        # action buttons
         buttons_layout = QtWidgets.QHBoxLayout()
         
         # summary button
-        summary_btn = QtWidgets.QPushButton("Summary")
+        summary_btn = QtWidgets.QPushButton("📋 Summary")
         summary_btn.setStyleSheet(self._get_button_style("#3498db"))
         summary_btn.clicked.connect(
             lambda: self.summary_requested.emit(result.resume.id)
@@ -216,7 +257,7 @@ class ResultsPanel(QtWidgets.QWidget):
         buttons_layout.addWidget(summary_btn)
         
         # view cv button
-        view_btn = QtWidgets.QPushButton("View CV")
+        view_btn = QtWidgets.QPushButton("📄 View CV")
         view_btn.setStyleSheet(self._get_button_style("#2ecc71"))
         view_btn.clicked.connect(
             lambda: self.view_cv_requested.emit(result.resume.id)
@@ -229,54 +270,61 @@ class ResultsPanel(QtWidgets.QWidget):
         return card
     
     def _format_matched_keywords(self, keyword_matches: dict) -> str:
-        """format matched keywords untuk display"""
+        """format matched keywords untuk display yang readable"""
         if not keyword_matches:
-            return "No keywords matched"
+            return "❌ No keywords matched"
         
         formatted = []
         for keyword, count in keyword_matches.items():
             if count > 0:
-                formatted.append(f"{keyword}: {count} occurrence{'s' if count > 1 else ''}")
+                if "(fuzzy)" in keyword.lower():
+                    formatted.append(f"🔍 {keyword}: {count}x")
+                else:
+                    formatted.append(f"✅ {keyword}: {count}x")
         
-        return "; ".join(formatted) if formatted else "No keywords matched"
+        return "  •  ".join(formatted) if formatted else "❌ No keywords matched"
     
     def _get_button_style(self, color: str) -> str:
-        """ambil style untuk button"""
+        """get button style dengan hover effects"""
         return f"""
             QPushButton {{
                 background-color: {color};
                 color: white;
                 border: none;
                 padding: 8px 16px;
-                border-radius: 4px;
+                border-radius: 6px;
                 font-size: 12px;
                 font-weight: bold;
-                min-width: 80px;
+                min-width: 90px;
             }}
             QPushButton:hover {{
                 background-color: {color}dd;
+                transform: translateY(-1px);
             }}
             QPushButton:pressed {{
                 background-color: {color}bb;
+                transform: translateY(0px);
             }}
         """
     
     def show_loading(self, message: str = "Searching..."):
-        """tampilkan loading state"""
+        """show loading state dengan animation"""
         self.clear_results()
         
         loading_widget = QtWidgets.QWidget()
         loading_layout = QtWidgets.QVBoxLayout(loading_widget)
         loading_layout.setAlignment(QtCore.Qt.AlignCenter)
         
-        # loading spinner (simple text for now)
-        loading_label = QtWidgets.QLabel(message)
+        loading_label = QtWidgets.QLabel(f"🔍 {message}")
         loading_label.setAlignment(QtCore.Qt.AlignCenter)
         loading_label.setStyleSheet("""
             QLabel {
                 font-size: 16px;
                 color: #3498db;
                 padding: 50px;
+                background-color: #f0f8ff;
+                border-radius: 8px;
+                border: 2px solid #3498db;
             }
         """)
         
@@ -284,7 +332,7 @@ class ResultsPanel(QtWidgets.QWidget):
         self.results_layout.addWidget(loading_widget)
     
     def get_result_by_id(self, resume_id: str) -> SearchResult:
-        """ambil search result berdasarkan resume id"""
+        """get search result by resume id"""
         for result in self.search_results:
             if result.resume.id == resume_id:
                 return result

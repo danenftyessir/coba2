@@ -1,14 +1,20 @@
 [project]
 name = "ats-cv-search"
-version = "0.1.0"
-description = "ATS CV Search Application - Tubes 3 Stima"
+version = "1.0.0"
+description = "ATS CV Search Application - Tubes 3 Stima with Pattern Matching & Regex Extraction"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "PyQt5>=5.15.0",
     "mysql-connector-python>=8.0.0",
     "PyPDF2>=3.0.0",
-    "sqlalchemy>=2.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
 ]
 
 [build-system]
@@ -21,8 +27,12 @@ packages = ["src"]
 [tool.hatch.build]
 include = [
     "src/**/*.py",
+    "main.py",
+    "detect_mysql_port.py",
+    "setup_database.py",
+    "test_db.py",
     "README.md",
-    "LICENSE",
+    "pyproject.toml",
 ]
 exclude = [
     "*.pyc",
@@ -31,4 +41,13 @@ exclude = [
     ".venv",
     "data/*",
     "doc/*",
+    ".env",
 ]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ['E203', 'W503']
