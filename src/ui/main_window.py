@@ -1,11 +1,14 @@
 # src/ui/main_window.py
-from PyQt5 import QtWidgets, QtCore
-from .search_panel import SearchPanel
-from .results_panel import ResultsPanel
-from .summary_view import SummaryView
-from ..controller.search import SearchController
-from ..controller.cv import CVController
-from ..database.config import DatabaseConfig
+import sys
+import os
+from PyQt5 import QtWidgets, QtCore, QtGui
+
+from ui.search_panel import SearchPanel
+from ui.results_panel import ResultsPanel
+from ui.summary_view import SummaryView
+from controller.search import SearchController
+from controller.cv import CVController
+from database.repo import ResumeRepository
 
 class MainWindow(QtWidgets.QMainWindow):
     """main window aplikasi cv search dengan optimized startup"""
@@ -13,22 +16,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         
-        # controllers
+        # initialize controllers
         self.search_controller = SearchController()
         self.cv_controller = CVController()
+        self.repo = ResumeRepository()
         
-        # ui components
-        self.search_panel = None
-        self.results_panel = None
-        self.summary_view = None
+        # setupAnd.  progress callback
+        self.search_controller.set_progress_callback(self.update_progress)
         
-        # setup
+        # create UI components
         self.setup_ui()
+        self.create_menu_bar()
         self.setup_connections()
         
-        # check database in background to avoid blocking ui
-        QtCore.QTimer.singleShot(500, self.check_database_connection)
-    
+        # check database connection
+        self.check_database_connection()
+        
+        print("main window initialized successfully")
+
     def setup_ui(self):
         """setup user interface dengan layout yang professional"""
         self.setWindowTitle("ATS CV Search Application - Stima Tubes 3")
@@ -57,7 +62,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """)
         main_layout.addWidget(self.search_panel)
         
-        # right panel (results display)
+        # right panel (results)
         self.results_panel = ResultsPanel()
         self.results_panel.setStyleSheet("""
             ResultsPanel {
@@ -69,125 +74,88 @@ class MainWindow(QtWidgets.QMainWindow):
         # summary view dialog
         self.summary_view = SummaryView(self)
         
-        # status bar
-        self.statusBar().showMessage("initializing application...")
-        self.statusBar().setStyleSheet("""
-            QStatusBar {
-                background-color: #e9ecef;
-                border-top: 1px solid #dee2e6;
-                padding: 8px;
-                font-size: 12px;
-                color: #495057;
-            }
-        """)
-        
-        # menu bar (optional)
-        self.create_menu_bar()
-        
-        # window styling
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #ffffff;
-            }
-        """)
-    
+        # setup status bar
+        self.statusBar().showMessage("ready - enter keywords to search cv database")
+
     def create_menu_bar(self):
         """create simple menu bar"""
         menubar = self.menuBar()
         
-        # file menu
-        file_menu = menubar.addMenu('File')
-        
-        # exit action
-        exit_action = QtWidgets.QAction('Exit', self)
-        exit_action.setShortcut('Ctrl+Q')
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-        
         # help menu
         help_menu = menubar.addMenu('Help')
         
-        # about action
         about_action = QtWidgets.QAction('About', self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
-    
+
     def setup_connections(self):
         """setup signal connections tanpa threading complexity"""
         print("setting up signal connections...")
         
-        # search panel signals - handle dict parameter to avoid overload
+        # search panel to main window
         self.search_panel.search_requested.connect(self.perform_search)
         print("search panel connected")
         
-        # results panel signals
+        # results panel to main window
         self.results_panel.summary_requested.connect(self.show_cv_summary)
         self.results_panel.view_cv_requested.connect(self.view_cv_file)
         print("results panel connected")
         
-        # summary view signals
+        # summary view to main window
         self.summary_view.view_cv_requested.connect(self.view_cv_file)
         print("summary view connected")
         
-        print("all signal connections established")
-    
+        print("all siKarimnagar. gnal connections established")
+
     def check_database_connection(self):
-        """check database connection dengan non-blocking approach"""
+        """check database connection using repository"""
         print("checking database connection...")
         
         try:
-            # quick connection test
-            db_config = DatabaseConfig()
-            conn = db_config.get_connection()
-            
-            if conn and conn.is_connected():
-                # quick table check
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM resumes")
-                count = cursor.fetchone()[0]
-                cursor.close()
-                conn.close()
-                
+            resumes = self.repo.get_all_resumes()
+            if resumes:
+                count = len(resumes)
                 print(f"database connected successfully! found {count} resumes")
-                self.statusBar().showMessage(f"ready - database connected ({count} resumes available)")
-                
-                # enable search functionality
-                self.search_panel.setEnabled(True)
-                
+                self.statusBar().showMessage(f"database connected - {count} cvs ready for search")
             else:
-                print("database connection failed")
-                self.statusBar().showMessage("warning - database connection failed")
-                
-                # show warning but allow app to continue
-                QtCore.QTimer.singleShot(1000, self.show_database_warning)
+                self.show_database_warning()
                 
         except Exception as e:
-            print(f"database check error: {e}")
-            self.statusBar().showMessage("error - database connection failed")
-            QtCore.QTimer.singleShot(1000, self.show_database_error)
-    
+            print(f"database connection error: {e}")
+            self.show_database_error()
+
     def show_database_warning(self):
         """show database warning dialog"""
         QtWidgets.QMessageBox.warning(
             self,
             "Database Warning",
-            "Cannot connect to database.\n\n"
-            "Application will work in limited mode.\n"
-            "Please check MySQL connection and try again."
+            "Database connected but no resume data found.\n\n"
+            "Please check:\n"
+            "• Database has been seeded with resume data\n"
+            "• CV files exist in data directory\n"
+            "• Database connection is working properly"
         )
-    
+        self.statusBar().showMessage("database connected but no data found")
+
     def show_database_error(self):
         """show database error dialog"""
         QtWidgets.QMessageBox.critical(
             self,
-            "Database Error", 
-            "Database connection failed.\n\n"
+            "Database Error",
+            "Failed to connect to database.\n\n"
             "Please check:\n"
-            "• MySQL server is running\n"
+            "• PostgreSQL server is running\n"
             "• Database credentials are correct\n"
-            "• Run setup_database.py if needed"
+            "• Database exists and is accessible\n\n"
+            "Application will continue but search may not work."
         )
-    
+        self.statusBar().showMessage("database connection failed")
+
+    def update_progress(self, message: str):
+        """update progress in status bar"""
+        self.statusBar().showMessage(message)
+        QtWidgets.QApplication.processEvents()  # update UI immediately
+
     @QtCore.pyqtSlot(dict)
     def perform_search(self, search_params):
         """handle search request dengan direct execution (no threading)"""
@@ -263,7 +231,7 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             # restore ui state
             self.search_panel.set_search_enabled(True)
-    
+
     @QtCore.pyqtSlot(str)
     def show_cv_summary(self, resume_id):
         """show cv summary dengan comprehensive regex extraction"""
@@ -299,10 +267,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"Error loading CV summary:\n\n{str(e)}"
             )
             self.statusBar().showMessage("summary loading failed")
-    
+
     @QtCore.pyqtSlot(str)
     def view_cv_file(self, resume_id):
-        """open cv file dengan default application"""
+        """open cv file dengan default application - improved error handling"""
         try:
             print(f"opening cv file for resume {resume_id}")
             self.statusBar().showMessage(f"opening cv file for {resume_id}...")
@@ -314,26 +282,36 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage("cv file opened successfully")
             else:
                 print(f"failed to open cv file for {resume_id}")
+                
+                # Get file path for manual access
+                resume = self.cv_controller.get_resume_info(resume_id)
+                file_path = resume.file_path if resume else "unknown"
+                
                 QtWidgets.QMessageBox.warning(
                     self,
                     "File Error",
                     f"Could not open CV file for {resume_id}.\n\n"
-                    f"The file might be:\n"
-                    f"• Missing from data folder\n"
-                    f"• Corrupted\n"
-                    f"• No default PDF application set"
+                    f"File location: {file_path}\n\n"
+                    f"Possible solutions:\n"
+                    f"• Install PDF viewer: sudo apt install evince\n"
+                    f"• Install xdg-utils: sudo apt install xdg-utils\n"
+                    f"• Install Firefox: sudo apt install firefox\n"
+                    f"• Manually navigate to file location\n\n"
+                    f"Or copy this path to file manager:\n{file_path}"
                 )
-                self.statusBar().showMessage("failed to open cv file")
+                self.statusBar().showMessage("failed to open cv file - see suggestions")
                 
         except Exception as e:
             print(f"file open error: {e}")
             QtWidgets.QMessageBox.critical(
                 self,
                 "File Error",
-                f"Error opening CV file:\n\n{str(e)}"
+                f"Error opening CV file:\n\n{str(e)}\n\n"
+                f"Please install a PDF viewer:\n"
+                f"sudo apt install xdg-utils evince"
             )
             self.statusBar().showMessage("file opening failed")
-    
+
     def show_about(self):
         """show about dialog"""
         QtWidgets.QMessageBox.about(
@@ -348,13 +326,13 @@ class MainWindow(QtWidgets.QMainWindow):
             "<li>Pattern Matching (KMP, Boyer-Moore, Aho-Corasick)</li>"
             "<li>Fuzzy Matching (Levenshtein Distance)</li>"
             "<li>Regex-based Information Extraction</li>"
-            "<li>MySQL Database Integration</li>"
+            "<li>PostgreSQL Database Integration</li>"
             "</ul>"
             "<hr>"
-            "<p><b>Built with:</b> Python, PyQt5, MySQL</p>"
+            "<p><b>Built with:</b> Python, PyQt5, PostgreSQL</p>"
             "<p><b>Institut Teknologi Bandung</b></p>"
         )
-    
+
     def closeEvent(self, event):
         """handle application closing"""
         reply = QtWidgets.QMessageBox.question(

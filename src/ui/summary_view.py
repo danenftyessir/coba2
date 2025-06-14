@@ -1,6 +1,6 @@
 # src/ui/summary_view.py
 from PyQt5 import QtWidgets, QtCore
-from ..database.models import CVSummary, JobHistory, Education
+from database.models import CVSummary, JobHistory, Education
 
 class SummaryView(QtWidgets.QDialog):
     """dialog untuk menampilkan summary cv dengan job history dan education lengkap"""

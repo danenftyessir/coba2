@@ -1,27 +1,25 @@
 # src/ui/search_panel.py
 from PyQt5 import QtWidgets, QtCore
-from typing import Dict
 
 class SearchPanel(QtWidgets.QWidget):
     """panel input untuk pencarian cv tanpa 4-param emit issue"""
     
-    # signal dengan 3 parameter saja untuk menghindari overload issue
-    search_requested = QtCore.pyqtSignal(dict)  # single dict parameter
+    search_requested = QtCore.pyqtSignal(dict)
     
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self):
+        super().__init__()
         self.setup_ui()
-        
+        self.setup_connections()
+    
     def setup_ui(self):
-        """setup user interface dengan design yang clean"""
+        """setup ui components dengan styling professional"""
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(20)
         layout.setContentsMargins(20, 20, 20, 20)
         
         # title
-        title = QtWidgets.QLabel("CV Analyzer App")
-        title.setAlignment(QtCore.Qt.AlignCenter)
-        title.setStyleSheet("""
+        title_label = QtWidgets.QLabel("🔍 ATS CV Search")
+        title_label.setStyleSheet("""
             QLabel {
                 font-size: 24px;
                 font-weight: bold;
@@ -29,7 +27,7 @@ class SearchPanel(QtWidgets.QWidget):
                 margin-bottom: 10px;
             }
         """)
-        layout.addWidget(title)
+        layout.addWidget(title_label)
         
         # keywords input section
         keywords_group = self._create_keywords_section()
@@ -43,10 +41,15 @@ class SearchPanel(QtWidgets.QWidget):
         matches_group = self._create_matches_section()
         layout.addWidget(matches_group)
         
-        # search button
-        search_btn = self._create_search_button()
-        layout.addWidget(search_btn)
+        # threshold section
+        threshold_group = self._create_threshold_section()
+        layout.addWidget(threshold_group)
         
+        # search button
+        search_button = self._create_search_button()
+        layout.addWidget(search_button)
+        
+        # add stretch to push everything to top
         layout.addStretch()
     
     def _create_keywords_section(self) -> QtWidgets.QGroupBox:
@@ -60,29 +63,37 @@ class SearchPanel(QtWidgets.QWidget):
                 margin-top: 10px;
                 padding-top: 10px;
             }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
         """)
         
         layout = QtWidgets.QVBoxLayout(group)
         
         self.keywords_input = QtWidgets.QLineEdit()
-        self.keywords_input.setPlaceholderText("React, Express, HTML, Python...")
+        self.keywords_input.setPlaceholderText("Enter keywords separated by commas (e.g., Python, React, SQL)")
         self.keywords_input.setStyleSheet("""
             QLineEdit {
-                padding: 8px;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
+                padding: 12px;
                 font-size: 14px;
+                border: 2px solid #ecf0f1;
+                border-radius: 6px;
+                background-color: white;
             }
             QLineEdit:focus {
                 border-color: #3498db;
             }
         """)
         layout.addWidget(self.keywords_input)
+        
+        # example label
+        example_label = QtWidgets.QLabel("💡 Examples: JavaScript, Machine Learning, Project Management")
+        example_label.setStyleSheet("""
+            QLabel {
+                font-size: 11px;
+                color: #7f8c8d;
+                margin-top: 5px;
+                font-weight: normal;
+            }
+        """)
+        layout.addWidget(example_label)
         
         return group
     
@@ -110,127 +121,48 @@ class SearchPanel(QtWidgets.QWidget):
         
         self.kmp_radio = QtWidgets.QRadioButton("KMP")
         self.bm_radio = QtWidgets.QRadioButton("BM")
-        self.ac_radio = QtWidgets.QRadioButton("AC")
+        self.ac_radio = QtWidgets.QRadioButton("AC")  # Aho-Corasick
         
-        # fuzzy matching algorithm
-        self.levenshtein_radio = QtWidgets.QRadioButton("Levenshtein")
-        
-        # default selection
+        # set KMP as default
         self.kmp_radio.setChecked(True)
-        
-        # styling
-        radio_style = """
-            QRadioButton {
-                font-size: 14px;
-                spacing: 5px;
-                margin: 2px;
-            }
-            QRadioButton::indicator {
-                width: 18px;
-                height: 18px;
-            }
-        """
-        
-        for radio in [self.kmp_radio, self.bm_radio, self.ac_radio, self.levenshtein_radio]:
-            radio.setStyleSheet(radio_style)
         
         exact_layout.addWidget(self.kmp_radio)
         exact_layout.addWidget(self.bm_radio)
         exact_layout.addWidget(self.ac_radio)
-        exact_layout.addStretch()
-        
         layout.addLayout(exact_layout)
         
-        # fuzzy matching section
+        # fuzzy matching algorithm
         fuzzy_label = QtWidgets.QLabel("Fuzzy Matching:")
         fuzzy_label.setStyleSheet("font-size: 12px; color: #7f8c8d; margin-top: 10px;")
         layout.addWidget(fuzzy_label)
         
-        fuzzy_layout = QtWidgets.QHBoxLayout()
-        fuzzy_layout.addWidget(self.levenshtein_radio)
-        fuzzy_layout.addStretch()
+        self.levenshtein_radio = QtWidgets.QRadioButton("Levenshtein Distance")
+        layout.addWidget(self.levenshtein_radio)
         
-        layout.addLayout(fuzzy_layout)
-        
-        # similarity threshold for levenshtein
-        threshold_layout = QtWidgets.QHBoxLayout()
-        threshold_label = QtWidgets.QLabel("Similarity Threshold:")
-        threshold_label.setStyleSheet("font-size: 11px; color: #7f8c8d; margin-left: 20px;")
-        
-        self.threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.threshold_slider.setRange(30, 100)  # 0.3 to 1.0
-        self.threshold_slider.setValue(70)       # default 0.7
-        self.threshold_slider.setMaximumWidth(100)
-        self.threshold_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                border: 1px solid #bdc3c7;
-                height: 6px;
-                background: #ecf0f1;
-                border-radius: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #3498db;
-                border: 1px solid #2980b9;
-                width: 14px;
-                margin: -5px 0;
-                border-radius: 7px;
+        # algorithm descriptions
+        desc_label = QtWidgets.QLabel(
+            "• KMP: Fast single pattern matching\n"
+            "• BM: Efficient for longer patterns\n"
+            "• AC: Multiple pattern matching (bonus)\n"
+            "• Levenshtein: Handles typos and variations"
+        )
+        desc_label.setStyleSheet("""
+            QLabel {
+                font-size: 10px;
+                color: #95a5a6;
+                margin-top: 8px;
+                font-weight: normal;
+                background-color: #f8f9fa;
+                padding: 8px;
+                border-radius: 4px;
             }
         """)
-        
-        self.threshold_value_label = QtWidgets.QLabel("0.70")
-        self.threshold_value_label.setStyleSheet("font-size: 11px; color: #2c3e50; font-weight: bold; min-width: 30px;")
-        
-        # connect slider to label update
-        self.threshold_slider.valueChanged.connect(self._update_threshold_label)
-        
-        threshold_layout.addWidget(threshold_label)
-        threshold_layout.addWidget(self.threshold_slider)
-        threshold_layout.addWidget(self.threshold_value_label)
-        threshold_layout.addStretch()
-        
-        layout.addLayout(threshold_layout)
-        
-        # enable/disable threshold based on algorithm selection
-        self.levenshtein_radio.toggled.connect(self._on_algorithm_changed)
-        self.kmp_radio.toggled.connect(self._on_algorithm_changed)
-        self.bm_radio.toggled.connect(self._on_algorithm_changed)
-        self.ac_radio.toggled.connect(self._on_algorithm_changed)
-        
-        # set initial state
-        self._on_algorithm_changed()
-        
-        # note about fuzzy matching
-        note_label = QtWidgets.QLabel("Note: Fuzzy matching also runs automatically if exact matching finds no results")
-        note_label.setStyleSheet("""
-            font-size: 10px; 
-            color: #95a5a6; 
-            margin-top: 5px;
-            font-style: italic;
-        """)
-        note_label.setWordWrap(True)
-        layout.addWidget(note_label)
+        layout.addWidget(desc_label)
         
         return group
     
-    def _update_threshold_label(self, value):
-        """update threshold label when slider changes"""
-        threshold = value / 100.0
-        self.threshold_value_label.setText(f"{threshold:.2f}")
-    
-    def _on_algorithm_changed(self):
-        """enable/disable threshold control based on algorithm"""
-        is_levenshtein = self.levenshtein_radio.isChecked()
-        self.threshold_slider.setEnabled(is_levenshtein)
-        self.threshold_value_label.setEnabled(is_levenshtein)
-        
-        # update threshold label style
-        if is_levenshtein:
-            self.threshold_value_label.setStyleSheet("font-size: 11px; color: #2c3e50; font-weight: bold; min-width: 30px;")
-        else:
-            self.threshold_value_label.setStyleSheet("font-size: 11px; color: #bdc3c7; font-weight: bold; min-width: 30px;")
-    
     def _create_matches_section(self) -> QtWidgets.QGroupBox:
-        """create top matches selector"""
+        """create top matches selection section"""
         group = QtWidgets.QGroupBox("Top Matches:")
         group.setStyleSheet("""
             QGroupBox {
@@ -242,38 +174,78 @@ class SearchPanel(QtWidgets.QWidget):
             }
         """)
         
-        layout = QtWidgets.QHBoxLayout(group)
+        layout = QtWidgets.QVBoxLayout(group)
         
-        self.top_matches_spin = QtWidgets.QSpinBox()
-        self.top_matches_spin.setRange(1, 50)
-        self.top_matches_spin.setValue(10)
-        self.top_matches_spin.setStyleSheet("""
+        self.matches_spin = QtWidgets.QSpinBox()
+        self.matches_spin.setRange(1, 50)
+        self.matches_spin.setValue(10)
+        self.matches_spin.setSuffix(" CVs")
+        self.matches_spin.setStyleSheet("""
             QSpinBox {
-                padding: 5px;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
+                padding: 8px 12px;
                 font-size: 14px;
-                min-width: 60px;
+                border: 2px solid #ecf0f1;
+                border-radius: 6px;
+                background-color: white;
+            }
+            QSpinBox:focus {
+                border-color: #3498db;
+            }
+        """)
+        layout.addWidget(self.matches_spin)
+        
+        return group
+    
+    def _create_threshold_section(self) -> QtWidgets.QGroupBox:
+        """create fuzzy matching threshold section"""
+        group = QtWidgets.QGroupBox("Fuzzy Threshold:")
+        group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
             }
         """)
         
-        layout.addWidget(self.top_matches_spin)
-        layout.addStretch()
+        layout = QtWidgets.QVBoxLayout(group)
+        
+        # threshold slider
+        self.threshold_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.threshold_slider.setRange(50, 100)  # 0.5 to 1.0
+        self.threshold_slider.setValue(70)  # 0.7 default
+        self.threshold_slider.setTickPosition(QtWidgets.QSlider.TicksBelow)
+        self.threshold_slider.setTickInterval(10)
+        layout.addWidget(self.threshold_slider)
+        
+        # threshold label
+        self.threshold_label = QtWidgets.QLabel("0.70 (70% similarity)")
+        self.threshold_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #7f8c8d;
+                text-align: center;
+                font-weight: normal;
+            }
+        """)
+        self.threshold_label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(self.threshold_label)
         
         return group
     
     def _create_search_button(self) -> QtWidgets.QPushButton:
         """create search button"""
-        btn = QtWidgets.QPushButton("Search")
-        btn.setStyleSheet("""
+        search_btn = QtWidgets.QPushButton("🔍 Search CVs")
+        search_btn.setStyleSheet("""
             QPushButton {
                 background-color: #3498db;
                 color: white;
                 border: none;
-                padding: 12px 24px;
+                padding: 15px;
                 font-size: 16px;
                 font-weight: bold;
-                border-radius: 6px;
+                border-radius: 8px;
                 min-height: 20px;
             }
             QPushButton:hover {
@@ -284,23 +256,37 @@ class SearchPanel(QtWidgets.QWidget):
             }
             QPushButton:disabled {
                 background-color: #bdc3c7;
+                color: #7f8c8d;
             }
         """)
         
-        btn.clicked.connect(self._on_search_clicked)
-        return btn
+        self.search_button = search_btn
+        return search_btn
     
-    def _on_search_clicked(self):
-        """handle search button click - emit single dict parameter"""
+    def setup_connections(self):
+        """setup signal connections"""
+        self.search_button.clicked.connect(self.on_search_clicked)
+        self.keywords_input.returnPressed.connect(self.on_search_clicked)
+        self.threshold_slider.valueChanged.connect(self.update_threshold_label)
+    
+    def update_threshold_label(self, value):
+        """update threshold label based on slider value"""
+        threshold = value / 100.0
+        self.threshold_label.setText(f"{threshold:.2f} ({value}% similarity)")
+    
+    def on_search_clicked(self):
+        """handle search button click"""
         keywords_text = self.keywords_input.text().strip()
+        
         if not keywords_text:
             QtWidgets.QMessageBox.warning(
                 self, "Warning", "Please enter keywords to search"
             )
             return
         
+        # parse keywords
         keywords = [kw.strip() for kw in keywords_text.split(',')]
-        keywords = [kw for kw in keywords if kw]
+        keywords = [kw for kw in keywords if kw]  # remove empty
         
         if not keywords:
             QtWidgets.QMessageBox.warning(
@@ -308,21 +294,20 @@ class SearchPanel(QtWidgets.QWidget):
             )
             return
         
-        # get selected algorithm
-        algorithm = 'KMP'  # default
+        # determine algorithm
+        algorithm = "KMP"  # default
         if self.bm_radio.isChecked():
-            algorithm = 'BM'
+            algorithm = "BM"
         elif self.ac_radio.isChecked():
-            algorithm = 'AC'
+            algorithm = "AC"
         elif self.levenshtein_radio.isChecked():
-            algorithm = 'LEVENSHTEIN'
+            algorithm = "LEVENSHTEIN"
         
-        # get threshold value
+        # get other parameters
+        top_n = self.matches_spin.value()
         threshold = self.threshold_slider.value() / 100.0
         
-        top_n = self.top_matches_spin.value()
-        
-        # create search parameters dict - single parameter to avoid overload issues
+        # create search parameters dict
         search_params = {
             'keywords': keywords,
             'algorithm': algorithm,
@@ -331,53 +316,14 @@ class SearchPanel(QtWidgets.QWidget):
         }
         
         print(f"🎯 emitting search signal with params: {search_params}")
-        
-        # emit single dict parameter
         self.search_requested.emit(search_params)
     
     def set_search_enabled(self, enabled: bool):
         """enable/disable search functionality"""
+        self.search_button.setEnabled(enabled)
         self.keywords_input.setEnabled(enabled)
-        self.kmp_radio.setEnabled(enabled)
-        self.bm_radio.setEnabled(enabled)
-        self.ac_radio.setEnabled(enabled)
-        self.levenshtein_radio.setEnabled(enabled)
-        self.threshold_slider.setEnabled(enabled and self.levenshtein_radio.isChecked())
-        self.top_matches_spin.setEnabled(enabled)
         
-        # find and update search button
-        for child in self.findChildren(QtWidgets.QPushButton):
-            if child.text() in ["Search", "Searching..."]:
-                child.setEnabled(enabled)
-                if enabled:
-                    child.setText("Search")
-                    child.setStyleSheet("""
-                        QPushButton {
-                            background-color: #3498db;
-                            color: white;
-                            border: none;
-                            padding: 12px 24px;
-                            font-size: 16px;
-                            font-weight: bold;
-                            border-radius: 6px;
-                            min-height: 20px;
-                        }
-                        QPushButton:hover {
-                            background-color: #2980b9;
-                        }
-                    """)
-                else:
-                    child.setText("Searching...")
-                    child.setStyleSheet("""
-                        QPushButton {
-                            background-color: #bdc3c7;
-                            color: white;
-                            border: none;
-                            padding: 12px 24px;
-                            font-size: 16px;
-                            font-weight: bold;
-                            border-radius: 6px;
-                            min-height: 20px;
-                        }
-                    """)
-                break
+        if enabled:
+            self.search_button.setText("🔍 Search CVs")
+        else:
+            self.search_button.setText("⏳ Searching...")

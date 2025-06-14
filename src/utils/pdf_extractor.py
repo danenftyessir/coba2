@@ -3,112 +3,121 @@ import PyPDF2
 import os
 import re
 from typing import Optional
+import time
 
 class PDFExtractor:
-    """ekstraksi teks dari file pdf dengan optimasi"""
+    """ekstraksi teks dari file pdf dengan optimasi aggressive"""
     
     def __init__(self):
-        self.max_file_size_mb = 5  # skip files larger than 5mb
+        self.max_file_size_mb = 5  # reduced from 10MB
+        self.max_pages = 2  # reduced from 5 pages
+        self.max_extraction_time = 3  # max 3 seconds per file
+        self.text_cache = {}  # simple cache
+        self.failed_files = set()  # track failed files
     
     def extract_text(self, pdf_path: str) -> Optional[str]:
-        """ekstrak teks dari file pdf dengan error handling"""
+        """ekstrak teks dari file pdf dengan timeout dan aggressive limits"""
         if not os.path.exists(pdf_path):
-            print(f"⚠️ file not found: {pdf_path}")
             return None
+        
+        # check if already failed
+        if pdf_path in self.failed_files:
+            return "failed file skipped"
+        
+        # check cache first
+        if pdf_path in self.text_cache:
+            return self.text_cache[pdf_path]
         
         # check file size
         try:
             file_size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
             if file_size_mb > self.max_file_size_mb:
-                print(f"⚠️ skipping large file ({file_size_mb:.1f}mb): {pdf_path}")
+                self.failed_files.add(pdf_path)
                 return "large file skipped"
         except:
-            pass
+            self.failed_files.add(pdf_path)
+            return None
+
+        start_time = time.time()
         
         try:
             with open(pdf_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
+                
+                # quick check - if too many pages, skip
+                if len(pdf_reader.pages) > 10:
+                    self.failed_files.add(pdf_path)
+                    return "too many pages skipped"
+                
                 text = ""
+                max_pages = min(len(pdf_reader.pages), self.max_pages)
                 
-                # extract text from all pages
-                for page in pdf_reader.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
+                for i in range(max_pages):
+                    # check timeout
+                    if time.time() - start_time > self.max_extraction_time:
+                        print(f"⏱️ timeout extracting {pdf_path}")
+                        self.failed_files.add(pdf_path)
+                        return "timeout skipped"
+                    
+                    try:
+                        page = pdf_reader.pages[i]
+                        page_text = page.extract_text()
+                        if page_text:
+                            text += page_text + "\n"
+                        
+                        # if we have enough text, stop
+                        if len(text) > 5000:
+                            break
+                            
+                    except Exception as e:
+                        print(f"⚠️ error extracting page {i} from {pdf_path}: {e}")
+                        continue
                 
-                # clean extracted text
-                cleaned_text = self._clean_text(text)
-                return cleaned_text if cleaned_text else ""
+                # clean and cache the text
+                if text.strip():
+                    cleaned_text = self._clean_text(text)
+                    self.text_cache[pdf_path] = cleaned_text
+                    return cleaned_text
+                else:
+                    self.failed_files.add(pdf_path)
+                    return "no text extracted"
                 
         except Exception as e:
-            print(f"❌ error extracting pdf {pdf_path}: {e}")
+            print(f"⚠️ error reading pdf {pdf_path}: {e}")
+            self.failed_files.add(pdf_path)
             return None
-    
+
     def extract_text_for_matching(self, pdf_path: str) -> Optional[str]:
         """ekstrak teks khusus untuk pattern matching (lowercase, cleaned)"""
         text = self.extract_text(pdf_path)
-        if text and text != "large file skipped":
+        if text and text not in ["large file skipped", "failed file skipped", "timeout skipped", "too many pages skipped", "no text extracted"]:
             # convert to lowercase for matching
             text = text.lower()
-            # limit length for performance
-            if len(text) > 50000:
-                text = text[:50000]
+            # limit length for performance - very aggressive
+            if len(text) > 3000:  # reduced from 10000
+                text = text[:3000]
             return text
         return text
     
     def _clean_text(self, text: str) -> str:
-        """bersihkan teks hasil ekstraksi dengan preserve structure untuk regex"""
+        """bersihkan teks hasil ekstraksi dengan minimal processing"""
         if not text:
             return ""
+
+        # very simple cleaning
+        text = re.sub(r'\s+', ' ', text)  # normalize whitespace
+        text = text.strip()
         
-        # replace windows line endings
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        # limit length aggressively
+        if len(text) > 5000:
+            text = text[:5000]
         
-        # remove excessive whitespace but preserve line structure
-        lines = text.split('\n')
-        cleaned_lines = []
-        
-        for line in lines:
-            line = line.strip()
-            if line:
-                # remove multiple spaces within line
-                line = re.sub(r'\s+', ' ', line)
-                cleaned_lines.append(line)
-        
-        # join with single newlines
-        cleaned_text = '\n'.join(cleaned_lines)
-        
-        # ensure proper section spacing for regex
-        cleaned_text = self._fix_section_spacing(cleaned_text)
-        
-        return cleaned_text.strip()
-    
-    def _fix_section_spacing(self, text: str) -> str:
-        """fix spacing between sections untuk regex detection"""
-        # common section headers
-        section_headers = [
-            'SUMMARY', 'PROFILE', 'OVERVIEW', 'OBJECTIVE',
-            'EXPERIENCE', 'WORK HISTORY', 'EMPLOYMENT',
-            'EDUCATION', 'ACADEMIC', 'QUALIFICATIONS',
-            'SKILLS', 'TECHNICAL SKILLS', 'COMPETENCIES',
-            'ACHIEVEMENTS', 'ACCOMPLISHMENTS', 'AWARDS',
-            'PROJECTS', 'CERTIFICATIONS', 'LICENSES'
-        ]
-        
-        lines = text.split('\n')
-        result_lines = []
-        
-        for i, line in enumerate(lines):
-            line_upper = line.upper().strip()
-            
-            # check if this line is a section header
-            is_section = any(header in line_upper for header in section_headers)
-            
-            if is_section and i > 0:
-                # add blank line before section header if not already there
-                if result_lines and result_lines[-1].strip():
-                    result_lines.append('')
-            
-            result_lines.append(line)
-        
-        return '\n'.join(result_lines)
+        return text
+
+    def get_extraction_stats(self):
+        """get extraction statistics"""
+        return {
+            'cached_files': len(self.text_cache),
+            'failed_files': len(self.failed_files),
+            'total_processed': len(self.text_cache) + len(self.failed_files)
+        }

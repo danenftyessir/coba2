@@ -2,11 +2,12 @@
 import os
 import subprocess
 import platform
+import shutil
 from typing import Optional
-from ..database.models import CVSummary
-from ..database.repo import ResumeRepository
-from ..utils.pdf_extractor import PDFExtractor
-from ..utils.regex_extractor import RegexExtractor
+from database.models import CVSummary
+from database.repo import ResumeRepository
+from utils.pdf_extractor import PDFExtractor
+from utils.regex_extractor import RegexExtractor
 
 class CVController:
     """controller untuk operasi cv dengan regex extraction yang lengkap"""
@@ -57,7 +58,7 @@ class CVController:
         return summary
     
     def open_cv_file(self, resume_id: str) -> bool:
-        """buka file cv dengan aplikasi default"""
+        """buka file cv dengan aplikasi default - improved Linux support"""
         resume = self.repo.get_resume_by_id(resume_id)
         if not resume or not os.path.exists(resume.file_path):
             print(f"❌ cv file not found for resume {resume_id}")
@@ -71,8 +72,58 @@ class CVController:
                 os.startfile(resume.file_path)
             elif platform.system() == 'Darwin':  # macos
                 subprocess.run(['open', resume.file_path])
-            else:  # linux
-                subprocess.run(['xdg-open', resume.file_path])
+            else:  # linux - multiple fallback options
+                # Try different linux file openers in order of preference
+                linux_openers = [
+                    'xdg-open',      # standard
+                    'gnome-open',    # gnome
+                    'kde-open',      # kde
+                    'exo-open',      # xfce
+                    'gvfs-open',     # older gnome
+                    'firefox',       # browser fallback
+                    'google-chrome', # chrome fallback
+                    'chromium',      # chromium fallback
+                ]
+                
+                opened = False
+                for opener in linux_openers:
+                    if shutil.which(opener):  # check if command exists
+                        try:
+                            if opener in ['firefox', 'google-chrome', 'chromium']:
+                                # open in browser
+                                subprocess.run([opener, f"file://{os.path.abspath(resume.file_path)}"], 
+                                             check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            else:
+                                # use system file opener
+                                subprocess.run([opener, resume.file_path], 
+                                             check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            opened = True
+                            print(f"✓ cv file opened using {opener}")
+                            break
+                        except Exception as e:
+                            print(f"⚠️ failed to open with {opener}: {e}")
+                            continue
+                
+                if not opened:
+                    # Final fallback - try to find any PDF viewer
+                    pdf_viewers = ['evince', 'okular', 'atril', 'mupdf', 'zathura']
+                    for viewer in pdf_viewers:
+                        if shutil.which(viewer):
+                            try:
+                                subprocess.run([viewer, resume.file_path], 
+                                             check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                opened = True
+                                print(f"✓ cv file opened using PDF viewer {viewer}")
+                                break
+                            except Exception as e:
+                                print(f"⚠️ failed to open with {viewer}: {e}")
+                                continue
+                
+                if not opened:
+                    print("❌ no suitable file opener found on this Linux system")
+                    print("💡 please install one of: xdg-open, evince, okular, firefox")
+                    print(f"💡 or manually open: {resume.file_path}")
+                    return False
             
             print("✓ cv file opened successfully")
             return True

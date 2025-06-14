@@ -1,7 +1,7 @@
 # src/utils/regex_extractor.py
 import re
 from typing import List, Dict, Optional
-from ..database.models import CVSummary, JobHistory, Education
+from database.models import CVSummary, JobHistory, Education
 
 class RegexExtractor:
     """ekstraksi informasi cv menggunakan regex dengan job history dan education lengkap"""

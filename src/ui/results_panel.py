@@ -1,7 +1,7 @@
 # src/ui/results_panel.py
 from PyQt5 import QtWidgets, QtCore
 from typing import List
-from ..database.models import SearchResult
+from database.models import SearchResult
 
 class ResultsPanel(QtWidgets.QWidget):
     """panel untuk menampilkan hasil pencarian cv"""

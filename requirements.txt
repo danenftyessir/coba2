@@ -1,5 +1,11 @@
+# Core Dependencies
 PyQt5>=5.15.0
-mysql-connector-python>=8.0.0
+psycopg2-binary>=2.9.0
 PyPDF2>=3.0.0
 pandas>=1.5.0
-sqlalchemy>=2.0.0
+numpy>=1.21.0
+regex>=2023.0.0
+
+# Optional Development Tools
+pytest>=7.0.0
+memory-profiler>=0.60.0

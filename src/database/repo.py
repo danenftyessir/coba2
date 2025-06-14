@@ -1,16 +1,16 @@
 # src/database/repo.py
 from typing import List, Optional
 import os
-from .config import DatabaseConfig
-from .models import Resume
+from database.config_simple import DatabaseConfig
+from database.models import Resume
 
 class ResumeRepository:
     """repository untuk akses data resume dengan path correction dan optimasi"""
     
     def __init__(self):
         self.db_config = DatabaseConfig()
-        # set data base path relative to project root
-        self.data_base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data')
+        # set data base path relative to project root (go up two levels from src/database/)
+        self.data_base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'data')
         self.data_base_path = os.path.abspath(self.data_base_path)
         print(f"data base path: {self.data_base_path}")
     
@@ -73,7 +73,7 @@ class ResumeRepository:
             print(f"error loading resumes: {e}")
             return []
         finally:
-            if conn and conn.is_connected():
+            if conn and not conn.closed:
                 cursor.close()
                 conn.close()
     
@@ -127,7 +127,7 @@ class ResumeRepository:
             print(f"error getting resume {resume_id}: {e}")
             return None
         finally:
-            if conn and conn.is_connected():
+            if conn and not conn.closed:
                 cursor.close()
                 conn.close()
     
@@ -183,7 +183,7 @@ class ResumeRepository:
             print(f"error getting resumes for category {category}: {e}")
             return []
         finally:
-            if conn and conn.is_connected():
+            if conn and not conn.closed:
                 cursor.close()
                 conn.close()
     
